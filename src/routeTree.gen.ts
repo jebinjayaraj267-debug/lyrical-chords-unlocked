@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnalyzeRouteImport } from './routes/analyze'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as TunerRouteImport } from './routes/tuner'
+import { Route as SongIdRouteImport } from './routes/song.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -34,18 +35,25 @@ const TunerRoute = TunerRouteImport.update({
   path: '/tuner',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SongIdRoute = SongIdRouteImport.update({
+  id: '/song/$id',
+  path: '/song/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analyze': typeof AnalyzeRoute
   '/live': typeof LiveRoute
   '/tuner': typeof TunerRoute
+  '/song/$id': typeof SongIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analyze': typeof AnalyzeRoute
   '/live': typeof LiveRoute
   '/tuner': typeof TunerRoute
+  '/song/$id': typeof SongIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/analyze': typeof AnalyzeRoute
   '/live': typeof LiveRoute
   '/tuner': typeof TunerRoute
+  '/song/$id': typeof SongIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/analyze' | '/live' | '/tuner'
+  fullPaths: '/' | '/analyze' | '/live' | '/tuner' | '/song/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/analyze' | '/live' | '/tuner'
-  id: '__root__' | '/' | '/analyze' | '/live' | '/tuner'
+  to: '/' | '/analyze' | '/live' | '/tuner' | '/song/$id'
+  id: '__root__' | '/' | '/analyze' | '/live' | '/tuner' | '/song/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +76,7 @@ export interface RootRouteChildren {
   AnalyzeRoute: typeof AnalyzeRoute
   LiveRoute: typeof LiveRoute
   TunerRoute: typeof TunerRoute
+  SongIdRoute: typeof SongIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +109,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TunerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/song/$id': {
+      id: '/song/$id'
+      path: '/song/$id'
+      fullPath: '/song/$id'
+      preLoaderRoute: typeof SongIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyzeRoute: AnalyzeRoute,
   LiveRoute: LiveRoute,
   TunerRoute: TunerRoute,
+  SongIdRoute: SongIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

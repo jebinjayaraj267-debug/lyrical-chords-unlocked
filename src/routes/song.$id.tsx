@@ -2,8 +2,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
-  ChevronDown,
-  ChevronUp,
   FileImage,
   FileText,
   Languages,
@@ -349,5 +347,3 @@ function fmt(s: number) {
   const r = Math.floor(s % 60);
   return `${m}:${r.toString().padStart(2, "0")}`;
 }
-
-export { ChevronDown, ChevronUp };
