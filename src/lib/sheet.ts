@@ -23,7 +23,25 @@ export interface Sheet {
   sections: SheetSection[];
 }
 
-const SECTION_RE = /^\s*[[(]?\s*(intro|verse|pre[- ]?chorus|chorus|hook|bridge|refrain|interlude|solo|outro|coda|charanam|pallavi|anupallavi|mukhda|antara)\b[^\]\n)]*[\])]?\s*:?\s*$/i;
+const SECTION_WORDS =
+  "intro|verse|pre[- ]?chorus|chorus|hook|bridge|refrain|interlude|solo|outro|coda|charanam|pallavi|anupallavi|mukhda|antara";
+
+/** Bracketed marker, e.g. [Chorus 2] or (Bridge). */
+const BRACKET_SECTION_RE = /^\s*[[(]\s*([^\]\n)]{1,40})\s*[\])]\s*:?\s*$/;
+/** Bare marker on its own line, e.g. "Chorus:" or "Verse 2". */
+const BARE_SECTION_RE = new RegExp(`^\\s*(${SECTION_WORDS})\\s*\\d{0,2}\\s*:?\\s*$`, "i");
+
+function sectionNameOf(line: string): string | null {
+  const bracket = BRACKET_SECTION_RE.exec(line);
+  if (bracket) return titleCase(bracket[1]!.trim());
+  const bare = BARE_SECTION_RE.exec(line);
+  if (bare) return titleCase(line.replace(/[:]/g, "").trim());
+  return null;
+}
+
+function isSectionLine(line: string): boolean {
+  return sectionNameOf(line) !== null;
+}
 
 /** Collapse repeated chords and drop no-chord regions. */
 export function condenseChords(events: ChordEvent[]): ChordEvent[] {
@@ -44,9 +62,9 @@ function splitBlocks(lyrics: string): { name: string; lines: string[] }[] {
 
   for (const raw of lyrics.replace(/\r/g, "").split("\n")) {
     const line = raw.trimEnd();
-    if (SECTION_RE.test(line)) {
-      const label = line.replace(/[[\]():]/g, "").trim();
-      current = { name: titleCase(label), lines: [] };
+    const sectionName = sectionNameOf(line);
+    if (sectionName) {
+      current = { name: sectionName, lines: [] };
       blocks.push(current);
       continue;
     }
@@ -92,7 +110,7 @@ export function buildSheet(
   const romanLines = romanized
     .replace(/\r/g, "")
     .split("\n")
-    .filter((l) => l.trim() && !SECTION_RE.test(l));
+    .filter((l) => l.trim() && !isSectionLine(l));
 
   if (!lyrics.trim()) return instrumentalSheet(analysis, chords);
 
@@ -122,7 +140,8 @@ export function buildSheet(
       });
 
       const roman = romanLines[romanIdx++];
-      return { chords: placed, lyric, ...(roman ? { roman } : {}) };
+      const showRoman = roman && roman.trim() !== lyric.trim();
+      return { chords: placed, lyric, ...(showRoman ? { roman } : {}) };
     }),
   }));
 
