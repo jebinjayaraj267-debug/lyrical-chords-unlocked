@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnalyzeRouteImport } from './routes/analyze'
+import { Route as ChordsRouteImport } from './routes/chords'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as TunerRouteImport } from './routes/tuner'
 import { Route as SongIdRouteImport } from './routes/song.$id'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const AnalyzeRoute = AnalyzeRouteImport.update({
   id: '/analyze',
   path: '/analyze',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChordsRoute = ChordsRouteImport.update({
+  id: '/chords',
+  path: '/chords',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LiveRoute = LiveRouteImport.update({
@@ -44,6 +50,7 @@ const SongIdRoute = SongIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analyze': typeof AnalyzeRoute
+  '/chords': typeof ChordsRoute
   '/live': typeof LiveRoute
   '/tuner': typeof TunerRoute
   '/song/$id': typeof SongIdRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analyze': typeof AnalyzeRoute
+  '/chords': typeof ChordsRoute
   '/live': typeof LiveRoute
   '/tuner': typeof TunerRoute
   '/song/$id': typeof SongIdRoute
@@ -59,21 +67,24 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/analyze': typeof AnalyzeRoute
+  '/chords': typeof ChordsRoute
   '/live': typeof LiveRoute
   '/tuner': typeof TunerRoute
   '/song/$id': typeof SongIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/analyze' | '/live' | '/tuner' | '/song/$id'
+  fullPaths: '/' | '/analyze' | '/chords' | '/live' | '/tuner' | '/song/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/analyze' | '/live' | '/tuner' | '/song/$id'
-  id: '__root__' | '/' | '/analyze' | '/live' | '/tuner' | '/song/$id'
+  to: '/' | '/analyze' | '/chords' | '/live' | '/tuner' | '/song/$id'
+  id:
+    '__root__' | '/' | '/analyze' | '/chords' | '/live' | '/tuner' | '/song/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnalyzeRoute: typeof AnalyzeRoute
+  ChordsRoute: typeof ChordsRoute
   LiveRoute: typeof LiveRoute
   TunerRoute: typeof TunerRoute
   SongIdRoute: typeof SongIdRoute
@@ -93,6 +104,13 @@ declare module '@tanstack/react-router' {
       path: '/analyze'
       fullPath: '/analyze'
       preLoaderRoute: typeof AnalyzeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chords': {
+      id: '/chords'
+      path: '/chords'
+      fullPath: '/chords'
+      preLoaderRoute: typeof ChordsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/live': {
@@ -122,6 +140,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnalyzeRoute: AnalyzeRoute,
+  ChordsRoute: ChordsRoute,
   LiveRoute: LiveRoute,
   TunerRoute: TunerRoute,
   SongIdRoute: SongIdRoute,
