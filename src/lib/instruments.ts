@@ -213,14 +213,16 @@ export function voicingsFor(label: string, instrument: Instrument, max = 3): num
 
   for (let base = 0; base <= 9; base++) {
     const options: number[][] = instrument.tuning.map((open, i) => {
+      const pcSet = new Set(tones.pcs);
+      const inChord = (f: number) => pcSet.has((((open + f) % 12) + 12) % 12);
+      if (instrument.drone?.includes(i)) return inChord(0) ? [0, -1] : [-1];
       const list: number[] = [-1];
-      if (instrument.drone?.includes(i)) return [0, -1];
-      if (base > 0) list.push(0);
+      if (base > 0 && inChord(0)) list.push(0);
       const lo = base === 0 ? 0 : base;
-      for (let f = lo; f < lo + span; f++) list.push(f);
-      void open;
+      for (let f = lo; f < lo + span; f++) if (inChord(f)) list.push(f);
       return Array.from(new Set(list));
     });
+
 
     const frets: number[] = new Array(n).fill(-1);
     const walk = (i: number) => {
