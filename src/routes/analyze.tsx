@@ -201,6 +201,42 @@ function AnalyzePage() {
       </p>
 
       <div className="panel mt-5 p-4">
+        <Label htmlFor="link">YouTube or Spotify link</Label>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Imports the title, artist and artwork. Streaming apps don't allow their audio to be
+          downloaded, so record the track as it plays or pick the file below.
+        </p>
+        <div className="mt-2 flex gap-2">
+          <Input
+            id="link"
+            value={link}
+            placeholder="https://youtu.be/… or open.spotify.com/track/…"
+            onChange={(e) => setLink(e.target.value)}
+          />
+          <Button variant="secondary" onClick={() => void runImport()} disabled={importing}>
+            {importing ? <Loader2 className="size-4 animate-spin" /> : <Link2 className="size-4" />}
+          </Button>
+        </div>
+        {artwork && (
+          <img
+            src={artwork}
+            alt={`Artwork for ${title || "the imported track"}`}
+            loading="lazy"
+            className="mt-3 h-24 w-full rounded-lg object-cover"
+          />
+        )}
+        <Button
+          variant={recording ? "destructive" : "secondary"}
+          className="mt-3 w-full"
+          onClick={() => void toggleRecord()}
+        >
+          {recording ? <Square className="size-4" /> : <Mic className="size-4" />}
+          {recording ? `Stop recording (${recSecs}s)` : "Record what's playing"}
+        </Button>
+      </div>
+
+      <div className="panel mt-4 p-4">
+
         <input
           ref={fileRef}
           type="file"
