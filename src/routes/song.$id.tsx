@@ -19,10 +19,13 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { ChordDiagram } from "@/components/ChordDiagram";
 import { ChordSheetView } from "@/components/ChordSheetView";
+import { InstrumentPicker } from "@/components/InstrumentPicker";
 import { getAudio, deleteAudio } from "@/lib/audio-store";
 import { downloadSheetImage, downloadSheetPdf, downloadText } from "@/lib/export";
+import { useInstrument } from "@/lib/prefs";
 import { buildSheet, sheetToText, uniqueChords } from "@/lib/sheet";
 import { deleteSong, getSong, saveSong, type Song } from "@/lib/storage";
+
 
 export const Route = createFileRoute("/song/$id")({
   head: () => ({
