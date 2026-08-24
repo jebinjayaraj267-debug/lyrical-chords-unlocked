@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Music4, Upload, Wand2 } from "lucide-react";
+import { Link2, Loader2, Mic, Music4, Square, Upload, Wand2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { analyzeAudioBuffer, type AnalysisResult } from "@/lib/audio-analysis";
 import { putAudio } from "@/lib/audio-store";
+import { importLink } from "@/lib/link-import.functions";
 import { romanizeLyrics } from "@/lib/lyrics.functions";
 import { newId, saveSong } from "@/lib/storage";
 
@@ -27,12 +28,12 @@ export const Route = createFileRoute("/analyze")({
       {
         name: "description",
         content:
-          "Upload any audio file and get chords, key, tempo and a chord sheet, with Hinglish and Tanglish lyric transliteration.",
+          "Import a YouTube or Spotify link, pick an audio file or record what's playing, and get chords, key, tempo and a chord sheet with Hinglish and Tanglish lyrics.",
       },
       { property: "og:title", content: "Analyze a Song — ChordLab" },
       {
         property: "og:description",
-        content: "Chords, key and tempo from any audio file, right on your phone.",
+        content: "Chords, key and tempo from any track, right on your phone.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -46,6 +47,7 @@ type Style = "auto" | "hinglish" | "tanglish" | "english";
 function AnalyzePage() {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [artist, setArtist] = useState("");
@@ -54,12 +56,70 @@ function AnalyzePage() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState("");
+  const [link, setLink] = useState("");
+  const [artwork, setArtwork] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recSecs, setRecSecs] = useState(0);
+
+  useEffect(() => {
+    if (!recording) return;
+    const iv = window.setInterval(() => setRecSecs((s) => s + 1), 1000);
+    return () => window.clearInterval(iv);
+  }, [recording]);
 
   function onPick(f: File | null) {
     if (!f) return;
     setFile(f);
     if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
   }
+
+  async function runImport() {
+    if (!link.trim()) return;
+    setImporting(true);
+    try {
+      const meta = await importLink({ data: { url: link.trim() } });
+      setTitle(meta.title);
+      if (meta.artist) setArtist(meta.artist);
+      setArtwork(meta.thumbnail);
+      toast.success(`Imported details from ${meta.source === "youtube" ? "YouTube" : "Spotify"}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not read that link");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function toggleRecord() {
+    if (recording) {
+      recorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      const rec = new MediaRecorder(stream);
+      recorderRef.current = rec;
+      const chunks: BlobPart[] = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        const f = new File([blob], "recording.webm", { type: blob.type });
+        setFile(f);
+        setRecording(false);
+        if (!title) setTitle("Recording");
+        toast.success("Recording captured — tap Detect chords");
+      };
+      setRecSecs(0);
+      rec.start();
+      setRecording(true);
+    } catch {
+      toast.error("Microphone access was blocked");
+    }
+  }
+
 
   async function run() {
     if (!file) {
@@ -141,6 +201,42 @@ function AnalyzePage() {
       </p>
 
       <div className="panel mt-5 p-4">
+        <Label htmlFor="link">YouTube or Spotify link</Label>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Imports the title, artist and artwork. Streaming apps don't allow their audio to be
+          downloaded, so record the track as it plays or pick the file below.
+        </p>
+        <div className="mt-2 flex gap-2">
+          <Input
+            id="link"
+            value={link}
+            placeholder="https://youtu.be/… or open.spotify.com/track/…"
+            onChange={(e) => setLink(e.target.value)}
+          />
+          <Button variant="secondary" onClick={() => void runImport()} disabled={importing}>
+            {importing ? <Loader2 className="size-4 animate-spin" /> : <Link2 className="size-4" />}
+          </Button>
+        </div>
+        {artwork && (
+          <img
+            src={artwork}
+            alt={`Artwork for ${title || "the imported track"}`}
+            loading="lazy"
+            className="mt-3 h-24 w-full rounded-lg object-cover"
+          />
+        )}
+        <Button
+          variant={recording ? "destructive" : "secondary"}
+          className="mt-3 w-full"
+          onClick={() => void toggleRecord()}
+        >
+          {recording ? <Square className="size-4" /> : <Mic className="size-4" />}
+          {recording ? `Stop recording (${recSecs}s)` : "Record what's playing"}
+        </Button>
+      </div>
+
+      <div className="panel mt-4 p-4">
+
         <input
           ref={fileRef}
           type="file"

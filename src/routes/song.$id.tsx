@@ -19,10 +19,13 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { ChordDiagram } from "@/components/ChordDiagram";
 import { ChordSheetView } from "@/components/ChordSheetView";
+import { InstrumentPicker } from "@/components/InstrumentPicker";
 import { getAudio, deleteAudio } from "@/lib/audio-store";
 import { downloadSheetImage, downloadSheetPdf, downloadText } from "@/lib/export";
+import { useInstrument } from "@/lib/prefs";
 import { buildSheet, sheetToText, uniqueChords } from "@/lib/sheet";
 import { deleteSong, getSong, saveSong, type Song } from "@/lib/storage";
+
 
 export const Route = createFileRoute("/song/$id")({
   head: () => ({
@@ -50,7 +53,9 @@ function SongPage() {
   const navigate = useNavigate();
   const [song, setSong] = useState<Song | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [instrument, setInstrument] = useInstrument();
   const [fontSize, setFontSize] = useState(13);
+
   const [showRoman, setShowRoman] = useState(true);
   const [useFlats, setUseFlats] = useState(false);
   const [scrollSpeed, setScrollSpeed] = useState(0);
@@ -256,12 +261,14 @@ function SongPage() {
       {/* Chord shapes */}
       <div className="panel mt-4 p-4">
         <h2 className="text-sm font-semibold">Chords used</h2>
+        <InstrumentPicker className="mt-3" value={instrument} onChange={setInstrument} />
         <div className="mt-3 flex flex-wrap gap-3">
           {chordList.map((c) => (
-            <ChordDiagram key={c} chord={c} />
+            <ChordDiagram key={c} chord={c} instrument={instrument} />
           ))}
         </div>
       </div>
+
 
       {/* Sheet */}
       <div className="panel mt-4 p-2">
