@@ -256,12 +256,14 @@ function SongPage() {
       {/* Chord shapes */}
       <div className="panel mt-4 p-4">
         <h2 className="text-sm font-semibold">Chords used</h2>
+        <InstrumentPicker className="mt-3" value={instrument} onChange={setInstrument} />
         <div className="mt-3 flex flex-wrap gap-3">
           {chordList.map((c) => (
-            <ChordDiagram key={c} chord={c} />
+            <ChordDiagram key={c} chord={c} instrument={instrument} />
           ))}
         </div>
       </div>
+
 
       {/* Sheet */}
       <div className="panel mt-4 p-2">
