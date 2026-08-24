@@ -53,7 +53,9 @@ function SongPage() {
   const navigate = useNavigate();
   const [song, setSong] = useState<Song | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [instrument, setInstrument] = useInstrument();
   const [fontSize, setFontSize] = useState(13);
+
   const [showRoman, setShowRoman] = useState(true);
   const [useFlats, setUseFlats] = useState(false);
   const [scrollSpeed, setScrollSpeed] = useState(0);
