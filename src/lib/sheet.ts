@@ -115,46 +115,63 @@ export function buildSheet(
   if (!lyrics.trim()) return instrumentalSheet(analysis, chords);
 
   const blocks = splitBlocks(lyrics);
-  const totalLines = blocks.reduce((a, b) => a + b.lines.length, 0) || 1;
+  const allLines = blocks.flatMap((b) => b.lines);
+  if (allLines.length === 0 || chords.length === 0) return instrumentalSheet(analysis, chords);
 
-  let chordIdx = 0;
-  let lineCounter = 0;
+  // Each lyric line gets a slice of the song's timeline, weighted by how much
+  // text it holds, so long lines carry more chords than short ones.
+  const weights = allLines.map((l) => Math.max(4, l.trim().length));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  const songStart = chords[0]!.start;
+  const songEnd = chords[chords.length - 1]!.end;
+  const span = Math.max(0.001, songEnd - songStart);
+
+  const windows: { from: number; to: number }[] = [];
+  let acc = 0;
+  for (const w of weights) {
+    const from = songStart + (acc / totalWeight) * span;
+    acc += w;
+    windows.push({ from, to: songStart + (acc / totalWeight) * span });
+  }
+
+  const perLine: SheetChord[][] = allLines.map(() => []);
+  let li = 0;
+  for (const c of chords) {
+    while (li < windows.length - 1 && c.start >= windows[li]!.to) li += 1;
+    const win = windows[li]!;
+    const lyric = allLines[li]!;
+    const frac = Math.min(1, Math.max(0, (c.start - win.from) / Math.max(0.001, win.to - win.from)));
+    const target = Math.round(frac * Math.max(lyric.length - 1, 1));
+    perLine[li]!.push({ pos: target, label: c.label, time: c.start });
+  }
+
+  // Snap to word starts, drop duplicates that land on the same word, keep spacing legible.
+  const laidOut = perLine.map((list, i) => {
+    const lyric = allLines[i]!;
+    const placed: SheetChord[] = [];
+    for (const c of list) {
+      let pos = lyric.trim() ? snapToWord(lyric, c.pos) : c.pos;
+      const prev = placed[placed.length - 1];
+      if (prev) {
+        if (prev.label === c.label && pos <= prev.pos + prev.label.length + 1) continue;
+        if (pos <= prev.pos + prev.label.length) pos = prev.pos + prev.label.length + 1;
+      }
+      placed.push({ ...c, pos });
+    }
+    return placed;
+  });
+
+  let idx = 0;
   let romanIdx = 0;
-
   const sections: SheetSection[] = blocks.map((block) => ({
     name: block.name,
     lines: block.lines.map((lyric) => {
-      lineCounter += 1;
-      const target = Math.round((lineCounter / totalLines) * chords.length);
-      const slice = chords.slice(chordIdx, Math.max(chordIdx + 1, target));
-      chordIdx = Math.max(chordIdx + 1, target);
-
-      const spread = Math.max(lyric.length, 8);
-      const placed: SheetChord[] = [];
-      slice.forEach((c, i) => {
-        const raw = slice.length === 1 ? 0 : Math.round((i / slice.length) * spread);
-        let pos = snapToWord(lyric, raw);
-        const prev = placed[placed.length - 1];
-        if (prev && pos <= prev.pos + prev.label.length) pos = prev.pos + prev.label.length + 1;
-        placed.push({ pos, label: c.label, time: c.start });
-      });
-
+      const placed = laidOut[idx++] ?? [];
       const roman = romanLines[romanIdx++];
       const showRoman = roman && roman.trim() !== lyric.trim();
       return { chords: placed, lyric, ...(showRoman ? { roman } : {}) };
     }),
   }));
-
-  const leftovers = chords.slice(chordIdx);
-  if (leftovers.length) {
-    sections.push({
-      name: "Outro",
-      lines: chunk(leftovers, 4).map((group) => ({
-        chords: group.map((c, i) => ({ pos: i * 8, label: c.label, time: c.start })),
-        lyric: "",
-      })),
-    });
-  }
 
   return { sections };
 }

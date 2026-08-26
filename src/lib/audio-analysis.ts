@@ -113,6 +113,7 @@ interface Template {
   vec: Float32Array;
   weight: number;
   rootPc: number;
+  intervals: number[];
 }
 
 function buildTemplates(): Template[] {
@@ -127,7 +128,13 @@ function buildTemplates(): Template[] {
       for (const v of vec) norm += v * v;
       norm = Math.sqrt(norm) || 1;
       for (let i = 0; i < 12; i++) vec[i] = vec[i]! / norm;
-      out.push({ label: pcToNote(root) + q.suffix, vec, weight: q.weight, rootPc: root });
+      out.push({
+        label: pcToNote(root) + q.suffix,
+        vec,
+        weight: q.weight,
+        rootPc: root,
+        intervals: q.intervals,
+      });
     }
   }
   return out;
@@ -166,8 +173,29 @@ function hann(n: number): Float32Array {
 
 interface Frames {
   chroma: Float32Array[];
+  /** low-register chroma (bass notes) used to bias chord roots */
+  bass: Float32Array[];
   onset: Float32Array;
   frameTime: number;
+}
+
+/** Spectral whitening: divide each bin by a local average so timbre matters less. */
+function whiten(mag: Float32Array, w: number): Float32Array {
+  const n = mag.length;
+  const out = new Float32Array(n);
+  let sum = 0;
+  for (let i = 0; i < Math.min(w, n); i++) sum += mag[i]!;
+  let lo = 0;
+  let hi = Math.min(w, n) - 1;
+  for (let i = 0; i < n; i++) {
+    const nlo = Math.max(0, i - w);
+    const nhi = Math.min(n - 1, i + w);
+    while (hi < nhi) sum += mag[++hi]!;
+    while (lo < nlo) sum -= mag[lo++]!;
+    const mean = sum / (nhi - nlo + 1);
+    out[i] = mag[i]! / (mean + 1e-6);
+  }
+  return out;
 }
 
 function computeFrames(signal: Float32Array, sampleRate: number): Frames {
@@ -175,19 +203,22 @@ function computeFrames(signal: Float32Array, sampleRate: number): Frames {
   const win = hann(FRAME);
   const nFrames = Math.max(1, Math.floor((signal.length - FRAME) / HOP) + 1);
   const chroma: Float32Array[] = [];
+  const bass: Float32Array[] = [];
   const onset = new Float32Array(nFrames);
   const bins = FRAME / 2;
 
   // Precompute pitch class per FFT bin (only within musical range).
   const binPc = new Int16Array(bins).fill(-1);
   const binW = new Float32Array(bins);
+  const binBass = new Uint8Array(bins);
   for (let b = 1; b < bins; b++) {
     const freq = (b * sampleRate) / FRAME;
-    if (freq < 55 || freq > 2100) continue;
+    if (freq < 40 || freq > 2100) continue;
     const midi = 69 + 12 * Math.log2(freq / 440);
     binPc[b] = ((Math.round(midi) % 12) + 12) % 12;
-    // de-emphasise very high partials
-    binW[b] = freq < 1000 ? 1 : 0.55;
+    if (freq < 250) binBass[b] = 1;
+    // de-emphasise very high partials, and the sub range for the main chroma
+    binW[b] = freq < 65 ? 0.25 : freq < 1000 ? 1 : 0.5;
   }
 
   let prev: Float32Array | null = null;
@@ -196,33 +227,53 @@ function computeFrames(signal: Float32Array, sampleRate: number): Frames {
   for (let f = 0; f < nFrames; f++) {
     const off = f * HOP;
     for (let i = 0; i < FRAME; i++) frame[i] = (signal[off + i] ?? 0) * win[i]!;
-    const mag = fft.magnitude(frame);
+    const raw = fft.magnitude(frame);
+    const mag = whiten(raw, 24);
 
     const c = new Float32Array(12);
+    const bc = new Float32Array(12);
     let flux = 0;
     for (let b = 1; b < bins; b++) {
       const m = mag[b]!;
       const pc = binPc[b]!;
-      if (pc >= 0) c[pc] = c[pc]! + m * m * binW[b]!;
+      if (pc >= 0) {
+        c[pc] = c[pc]! + m * m * binW[b]!;
+        if (binBass[b]) bc[pc] = bc[pc]! + m * m;
+      }
       if (prev) {
-        const d = m - prev[b]!;
+        const d = raw[b]! - prev[b]!;
         if (d > 0) flux += d;
       }
     }
     onset[f] = flux;
-    prev = mag;
+    prev = raw;
+
+    // Harmonic suppression: remove energy explainable by a fifth/major-third below.
+    const h = new Float32Array(12);
+    for (let i = 0; i < 12; i++) {
+      h[i] = Math.max(0, c[i]! - 0.32 * c[(i + 5) % 12]! - 0.12 * c[(i + 8) % 12]!);
+    }
 
     // log compression + normalise
     let max = 0;
     for (let i = 0; i < 12; i++) {
-      c[i] = Math.log1p(c[i]! * 40);
+      c[i] = Math.log1p(h[i]! * 40);
       if (c[i]! > max) max = c[i]!;
     }
     if (max > 0) for (let i = 0; i < 12; i++) c[i] = c[i]! / max;
+
+    let bmax = 0;
+    for (let i = 0; i < 12; i++) {
+      bc[i] = Math.log1p(bc[i]! * 40);
+      if (bc[i]! > bmax) bmax = bc[i]!;
+    }
+    if (bmax > 0) for (let i = 0; i < 12; i++) bc[i] = bc[i]! / bmax;
+
     chroma.push(c);
+    bass.push(bc);
   }
 
-  return { chroma, onset, frameTime: HOP / sampleRate };
+  return { chroma, bass, onset, frameTime: HOP / sampleRate };
 }
 
 function movingAverage(x: Float32Array, w: number): Float32Array {
@@ -330,29 +381,104 @@ function averageChroma(chroma: Float32Array[], from: number, to: number): Float3
 }
 
 function matchChord(vec: Float32Array): { label: string; score: number } {
+  const scores = templateScores(vec, null, null);
+  let best = { label: "N", score: -Infinity };
+  for (let i = 0; i < TEMPLATES.length; i++) {
+    if (scores[i]! > best.score) best = { label: TEMPLATES[i]!.label, score: scores[i]! };
+  }
   let energy = 0;
   for (const v of vec) energy += v;
   if (energy < 0.35) return { label: "N", score: 0 };
-
-  let best = { label: "N", score: -Infinity };
-  for (const t of TEMPLATES) {
-    let dot = 0;
-    for (let i = 0; i < 12; i++) dot += vec[i]! * t.vec[i]!;
-    const s = dot * t.weight;
-    if (s > best.score) best = { label: t.label, score: s };
-  }
   return best;
 }
 
-/** Viterbi-style smoothing over per-beat candidates to avoid chord flicker. */
-function smoothLabels(labels: string[], scores: number[]): string[] {
-  const out = labels.slice();
-  for (let i = 1; i < out.length - 1; i++) {
-    if (out[i] !== out[i - 1] && out[i - 1] === out[i + 1] && scores[i]! < 0.92) {
-      out[i] = out[i - 1]!;
+/** Diatonic pitch classes for a key, used as a mild prior. */
+function scaleOf(pc: number, mode: "major" | "minor"): Set<number> {
+  const steps = mode === "major" ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10];
+  return new Set(steps.map((s) => (pc + s) % 12));
+}
+
+/** Emission score per template, with bass-root bias and key prior. */
+function templateScores(
+  vec: Float32Array,
+  bassVec: Float32Array | null,
+  scale: Set<number> | null,
+): Float32Array {
+  const out = new Float32Array(TEMPLATES.length);
+  for (let i = 0; i < TEMPLATES.length; i++) {
+    const t = TEMPLATES[i]!;
+    let dot = 0;
+    for (let j = 0; j < 12; j++) dot += vec[j]! * t.vec[j]!;
+    let s = dot * t.weight;
+    if (bassVec) s += 0.16 * bassVec[t.rootPc]!;
+    if (scale) {
+      let outside = 0;
+      for (const iv of t.intervals) {
+        if (!scale.has((t.rootPc + iv) % 12)) outside++;
+      }
+      s -= 0.02 * outside;
+      if (!scale.has(t.rootPc)) s -= 0.03;
     }
+    out[i] = s;
   }
   return out;
+}
+
+/**
+ * Viterbi decoding over beats: emission from chroma matching, transition cost
+ * that discourages chord changes (heavily so mid-bar) so we get one stable
+ * chord per bar rather than a new chord on every beat.
+ */
+function viterbiDecode(
+  emissions: Float32Array[],
+  beatsPerBar: number,
+  changeCost: number,
+): number[] {
+  const n = emissions.length;
+  const states = TEMPLATES.length;
+  if (n === 0) return [];
+  let prev = Float32Array.from(emissions[0]!);
+  const back: Int16Array[] = [];
+
+  for (let t = 1; t < n; t++) {
+    // Extra cost when the change is not on a downbeat / half-bar.
+    const inBar = t % beatsPerBar;
+    const positional =
+      inBar === 0 ? 0 : inBar === Math.floor(beatsPerBar / 2) ? changeCost * 0.5 : changeCost;
+    const cost = changeCost + positional;
+
+    let bestPrev = -Infinity;
+    let bestPrevIdx = 0;
+    for (let s = 0; s < states; s++) {
+      if (prev[s]! > bestPrev) {
+        bestPrev = prev[s]!;
+        bestPrevIdx = s;
+      }
+    }
+    const cur = new Float32Array(states);
+    const bp = new Int16Array(states);
+    const em = emissions[t]!;
+    for (let s = 0; s < states; s++) {
+      const stay = prev[s]!;
+      const move = bestPrev - cost;
+      if (stay >= move) {
+        cur[s] = stay + em[s]!;
+        bp[s] = s;
+      } else {
+        cur[s] = move + em[s]!;
+        bp[s] = bestPrevIdx;
+      }
+    }
+    back.push(bp);
+    prev = cur;
+  }
+
+  let last = 0;
+  for (let s = 1; s < states; s++) if (prev[s]! > prev[last]!) last = s;
+  const path = new Array<number>(n);
+  path[n - 1] = last;
+  for (let t = n - 2; t >= 0; t--) path[t] = back[t]![path[t + 1]!]!;
+  return path;
 }
 
 export interface AnalyzeOptions {
@@ -371,7 +497,7 @@ export async function analyzeAudioBuffer(
 
   report(20, "Building chromagram");
   await tick();
-  const { chroma, onset, frameTime } = computeFrames(signal, sampleRate);
+  const { chroma, bass, onset, frameTime } = computeFrames(signal, sampleRate);
 
   report(55, "Detecting tempo");
   await tick();
@@ -385,23 +511,39 @@ export async function analyzeAudioBuffer(
   report(70, "Estimating key");
   await tick();
   const key = estimateKey(chroma);
+  const scale = scaleOf(key.pc, key.mode);
 
   report(80, "Recognising chords");
   await tick();
-  const beatChords: string[] = [];
-  const beatScores: number[] = [];
+  const timeSignature = 4;
+  const emissions: Float32Array[] = [];
+  const beatEnergy: number[] = [];
   for (let i = 0; i < beats.length; i++) {
     const start = beats[i]!;
     const end = i + 1 < beats.length ? beats[i + 1]! : duration;
-    const f0 = Math.floor(start / frameTime);
-    const f1 = Math.ceil(end / frameTime);
-    const m = matchChord(averageChroma(chroma, f0, f1));
-    beatChords.push(m.label);
-    beatScores.push(m.score);
+    // widen the window slightly so sustained harmony dominates transients
+    const f0 = Math.floor((start - beatLen * 0.15) / frameTime);
+    const f1 = Math.ceil((end + beatLen * 0.15) / frameTime);
+    const vec = averageChroma(chroma, f0, f1);
+    const bassVec = averageChroma(bass, f0, f1);
+    let energy = 0;
+    for (const v of vec) energy += v;
+    beatEnergy.push(energy);
+    emissions.push(templateScores(vec, bassVec, scale));
   }
-  const smoothed = smoothLabels(beatChords, beatScores);
 
-  const chords: ChordEvent[] = [];
+  const path = viterbiDecode(emissions, timeSignature, 0.55);
+  const smoothed: string[] = [];
+  const beatScores: number[] = [];
+  for (let i = 0; i < path.length; i++) {
+    const idx = path[i]!;
+    const silent = beatEnergy[i]! < 0.35;
+    smoothed.push(silent ? "N" : TEMPLATES[idx]!.label);
+    beatScores.push(emissions[i]![idx]!);
+  }
+
+  // Merge runs, then absorb any chord shorter than half a bar into its neighbour.
+  let chords: ChordEvent[] = [];
   for (let i = 0; i < smoothed.length; i++) {
     const label = smoothed[i]!;
     const start = beats[i]!;
@@ -414,6 +556,7 @@ export async function analyzeAudioBuffer(
       chords.push({ start, end, label, confidence: beatScores[i]! });
     }
   }
+  chords = absorbShort(chords, beatLen * (timeSignature / 2));
 
   report(100, "Done");
   return {
@@ -423,10 +566,44 @@ export async function analyzeAudioBuffer(
     key: pcToNote(key.pc) + (key.mode === "minor" ? "m" : ""),
     keyPc: key.pc,
     mode: key.mode,
-    timeSignature: 4,
+    timeSignature,
     chords: chords.filter((c) => c.end - c.start > 0.08),
     beatChords: smoothed,
   };
+}
+
+/** Remove chord blips: anything shorter than `minLen` merges into its stronger neighbour. */
+function absorbShort(events: ChordEvent[], minLen: number): ChordEvent[] {
+  if (events.length < 2) return events;
+  let out = events.map((e) => ({ ...e }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < out.length; i++) {
+      const e = out[i]!;
+      if (e.end - e.start >= minLen || out.length === 1) continue;
+      const prev = out[i - 1];
+      const next = out[i + 1];
+      const target =
+        !prev ? next : !next ? prev : next.end - next.start >= prev.end - prev.start ? next : prev;
+      if (!target) continue;
+      target.start = Math.min(target.start, e.start);
+      target.end = Math.max(target.end, e.end);
+      out.splice(i, 1);
+      changed = true;
+      break;
+    }
+    // re-merge identical neighbours created by absorption
+    const merged: ChordEvent[] = [];
+    for (const e of out) {
+      const last = merged[merged.length - 1];
+      if (last && last.label === e.label) last.end = Math.max(last.end, e.end);
+      else merged.push(e);
+    }
+    if (merged.length !== out.length) changed = true;
+    out = merged;
+  }
+  return out;
 }
 
 function tick() {
