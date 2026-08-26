@@ -415,7 +415,7 @@ function templateScores(
     if (bassVec) s += 0.16 * bassVec[t.rootPc]!;
     if (scale) {
       let outside = 0;
-      for (const iv of QUALITIES.find((q) => t.label.endsWith(q.suffix))?.intervals ?? []) {
+      for (const iv of t.intervals) {
         if (!scale.has((t.rootPc + iv) % 12)) outside++;
       }
       s -= 0.02 * outside;
