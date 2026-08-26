@@ -113,6 +113,7 @@ interface Template {
   vec: Float32Array;
   weight: number;
   rootPc: number;
+  intervals: number[];
 }
 
 function buildTemplates(): Template[] {
@@ -127,9 +128,17 @@ function buildTemplates(): Template[] {
       for (const v of vec) norm += v * v;
       norm = Math.sqrt(norm) || 1;
       for (let i = 0; i < 12; i++) vec[i] = vec[i]! / norm;
-      out.push({ label: pcToNote(root) + q.suffix, vec, weight: q.weight, rootPc: root });
+      out.push({
+        label: pcToNote(root) + q.suffix,
+        vec,
+        weight: q.weight,
+        rootPc: root,
+        intervals: q.intervals,
+      });
     }
   }
+  return out;
+}
   return out;
 }
 
