@@ -166,8 +166,29 @@ function hann(n: number): Float32Array {
 
 interface Frames {
   chroma: Float32Array[];
+  /** low-register chroma (bass notes) used to bias chord roots */
+  bass: Float32Array[];
   onset: Float32Array;
   frameTime: number;
+}
+
+/** Spectral whitening: divide each bin by a local average so timbre matters less. */
+function whiten(mag: Float32Array, w: number): Float32Array {
+  const n = mag.length;
+  const out = new Float32Array(n);
+  let sum = 0;
+  for (let i = 0; i < Math.min(w, n); i++) sum += mag[i]!;
+  let lo = 0;
+  let hi = Math.min(w, n) - 1;
+  for (let i = 0; i < n; i++) {
+    const nlo = Math.max(0, i - w);
+    const nhi = Math.min(n - 1, i + w);
+    while (hi < nhi) sum += mag[++hi]!;
+    while (lo < nlo) sum -= mag[lo++]!;
+    const mean = sum / (nhi - nlo + 1);
+    out[i] = mag[i]! / (mean + 1e-6);
+  }
+  return out;
 }
 
 function computeFrames(signal: Float32Array, sampleRate: number): Frames {
@@ -175,19 +196,22 @@ function computeFrames(signal: Float32Array, sampleRate: number): Frames {
   const win = hann(FRAME);
   const nFrames = Math.max(1, Math.floor((signal.length - FRAME) / HOP) + 1);
   const chroma: Float32Array[] = [];
+  const bass: Float32Array[] = [];
   const onset = new Float32Array(nFrames);
   const bins = FRAME / 2;
 
   // Precompute pitch class per FFT bin (only within musical range).
   const binPc = new Int16Array(bins).fill(-1);
   const binW = new Float32Array(bins);
+  const binBass = new Uint8Array(bins);
   for (let b = 1; b < bins; b++) {
     const freq = (b * sampleRate) / FRAME;
-    if (freq < 55 || freq > 2100) continue;
+    if (freq < 40 || freq > 2100) continue;
     const midi = 69 + 12 * Math.log2(freq / 440);
     binPc[b] = ((Math.round(midi) % 12) + 12) % 12;
-    // de-emphasise very high partials
-    binW[b] = freq < 1000 ? 1 : 0.55;
+    if (freq < 250) binBass[b] = 1;
+    // de-emphasise very high partials, and the sub range for the main chroma
+    binW[b] = freq < 65 ? 0.25 : freq < 1000 ? 1 : 0.5;
   }
 
   let prev: Float32Array | null = null;
@@ -196,33 +220,53 @@ function computeFrames(signal: Float32Array, sampleRate: number): Frames {
   for (let f = 0; f < nFrames; f++) {
     const off = f * HOP;
     for (let i = 0; i < FRAME; i++) frame[i] = (signal[off + i] ?? 0) * win[i]!;
-    const mag = fft.magnitude(frame);
+    const raw = fft.magnitude(frame);
+    const mag = whiten(raw, 24);
 
     const c = new Float32Array(12);
+    const bc = new Float32Array(12);
     let flux = 0;
     for (let b = 1; b < bins; b++) {
       const m = mag[b]!;
       const pc = binPc[b]!;
-      if (pc >= 0) c[pc] = c[pc]! + m * m * binW[b]!;
+      if (pc >= 0) {
+        c[pc] = c[pc]! + m * m * binW[b]!;
+        if (binBass[b]) bc[pc] = bc[pc]! + m * m;
+      }
       if (prev) {
-        const d = m - prev[b]!;
+        const d = raw[b]! - prev[b]!;
         if (d > 0) flux += d;
       }
     }
     onset[f] = flux;
-    prev = mag;
+    prev = raw;
+
+    // Harmonic suppression: remove energy explainable by a fifth/major-third below.
+    const h = new Float32Array(12);
+    for (let i = 0; i < 12; i++) {
+      h[i] = Math.max(0, c[i]! - 0.32 * c[(i + 5) % 12]! - 0.12 * c[(i + 8) % 12]!);
+    }
 
     // log compression + normalise
     let max = 0;
     for (let i = 0; i < 12; i++) {
-      c[i] = Math.log1p(c[i]! * 40);
+      c[i] = Math.log1p(h[i]! * 40);
       if (c[i]! > max) max = c[i]!;
     }
     if (max > 0) for (let i = 0; i < 12; i++) c[i] = c[i]! / max;
+
+    let bmax = 0;
+    for (let i = 0; i < 12; i++) {
+      bc[i] = Math.log1p(bc[i]! * 40);
+      if (bc[i]! > bmax) bmax = bc[i]!;
+    }
+    if (bmax > 0) for (let i = 0; i < 12; i++) bc[i] = bc[i]! / bmax;
+
     chroma.push(c);
+    bass.push(bc);
   }
 
-  return { chroma, onset, frameTime: HOP / sampleRate };
+  return { chroma, bass, onset, frameTime: HOP / sampleRate };
 }
 
 function movingAverage(x: Float32Array, w: number): Float32Array {
