@@ -374,29 +374,104 @@ function averageChroma(chroma: Float32Array[], from: number, to: number): Float3
 }
 
 function matchChord(vec: Float32Array): { label: string; score: number } {
+  const scores = templateScores(vec, null, null);
+  let best = { label: "N", score: -Infinity };
+  for (let i = 0; i < TEMPLATES.length; i++) {
+    if (scores[i]! > best.score) best = { label: TEMPLATES[i]!.label, score: scores[i]! };
+  }
   let energy = 0;
   for (const v of vec) energy += v;
   if (energy < 0.35) return { label: "N", score: 0 };
-
-  let best = { label: "N", score: -Infinity };
-  for (const t of TEMPLATES) {
-    let dot = 0;
-    for (let i = 0; i < 12; i++) dot += vec[i]! * t.vec[i]!;
-    const s = dot * t.weight;
-    if (s > best.score) best = { label: t.label, score: s };
-  }
   return best;
 }
 
-/** Viterbi-style smoothing over per-beat candidates to avoid chord flicker. */
-function smoothLabels(labels: string[], scores: number[]): string[] {
-  const out = labels.slice();
-  for (let i = 1; i < out.length - 1; i++) {
-    if (out[i] !== out[i - 1] && out[i - 1] === out[i + 1] && scores[i]! < 0.92) {
-      out[i] = out[i - 1]!;
+/** Diatonic pitch classes for a key, used as a mild prior. */
+function scaleOf(pc: number, mode: "major" | "minor"): Set<number> {
+  const steps = mode === "major" ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10];
+  return new Set(steps.map((s) => (pc + s) % 12));
+}
+
+/** Emission score per template, with bass-root bias and key prior. */
+function templateScores(
+  vec: Float32Array,
+  bassVec: Float32Array | null,
+  scale: Set<number> | null,
+): Float32Array {
+  const out = new Float32Array(TEMPLATES.length);
+  for (let i = 0; i < TEMPLATES.length; i++) {
+    const t = TEMPLATES[i]!;
+    let dot = 0;
+    for (let j = 0; j < 12; j++) dot += vec[j]! * t.vec[j]!;
+    let s = dot * t.weight;
+    if (bassVec) s += 0.16 * bassVec[t.rootPc]!;
+    if (scale) {
+      let outside = 0;
+      for (const iv of QUALITIES.find((q) => t.label.endsWith(q.suffix))?.intervals ?? []) {
+        if (!scale.has((t.rootPc + iv) % 12)) outside++;
+      }
+      s -= 0.02 * outside;
+      if (!scale.has(t.rootPc)) s -= 0.03;
     }
+    out[i] = s;
   }
   return out;
+}
+
+/**
+ * Viterbi decoding over beats: emission from chroma matching, transition cost
+ * that discourages chord changes (heavily so mid-bar) so we get one stable
+ * chord per bar rather than a new chord on every beat.
+ */
+function viterbiDecode(
+  emissions: Float32Array[],
+  beatsPerBar: number,
+  changeCost: number,
+): number[] {
+  const n = emissions.length;
+  const states = TEMPLATES.length;
+  if (n === 0) return [];
+  let prev = Float32Array.from(emissions[0]!);
+  const back: Int16Array[] = [];
+
+  for (let t = 1; t < n; t++) {
+    // Extra cost when the change is not on a downbeat / half-bar.
+    const inBar = t % beatsPerBar;
+    const positional =
+      inBar === 0 ? 0 : inBar === Math.floor(beatsPerBar / 2) ? changeCost * 0.5 : changeCost;
+    const cost = changeCost + positional;
+
+    let bestPrev = -Infinity;
+    let bestPrevIdx = 0;
+    for (let s = 0; s < states; s++) {
+      if (prev[s]! > bestPrev) {
+        bestPrev = prev[s]!;
+        bestPrevIdx = s;
+      }
+    }
+    const cur = new Float32Array(states);
+    const bp = new Int16Array(states);
+    const em = emissions[t]!;
+    for (let s = 0; s < states; s++) {
+      const stay = prev[s]!;
+      const move = bestPrev - cost;
+      if (stay >= move) {
+        cur[s] = stay + em[s]!;
+        bp[s] = s;
+      } else {
+        cur[s] = move + em[s]!;
+        bp[s] = bestPrevIdx;
+      }
+    }
+    back.push(bp);
+    prev = cur;
+  }
+
+  let last = 0;
+  for (let s = 1; s < states; s++) if (prev[s]! > prev[last]!) last = s;
+  const path = new Array<number>(n);
+  path[n - 1] = last;
+  for (let t = n - 2; t >= 0; t--) path[t] = back[t]![path[t + 1]!]!;
+  return path;
 }
 
 export interface AnalyzeOptions {
@@ -415,7 +490,7 @@ export async function analyzeAudioBuffer(
 
   report(20, "Building chromagram");
   await tick();
-  const { chroma, onset, frameTime } = computeFrames(signal, sampleRate);
+  const { chroma, bass, onset, frameTime } = computeFrames(signal, sampleRate);
 
   report(55, "Detecting tempo");
   await tick();
@@ -429,23 +504,39 @@ export async function analyzeAudioBuffer(
   report(70, "Estimating key");
   await tick();
   const key = estimateKey(chroma);
+  const scale = scaleOf(key.pc, key.mode);
 
   report(80, "Recognising chords");
   await tick();
-  const beatChords: string[] = [];
-  const beatScores: number[] = [];
+  const timeSignature = 4;
+  const emissions: Float32Array[] = [];
+  const beatEnergy: number[] = [];
   for (let i = 0; i < beats.length; i++) {
     const start = beats[i]!;
     const end = i + 1 < beats.length ? beats[i + 1]! : duration;
-    const f0 = Math.floor(start / frameTime);
-    const f1 = Math.ceil(end / frameTime);
-    const m = matchChord(averageChroma(chroma, f0, f1));
-    beatChords.push(m.label);
-    beatScores.push(m.score);
+    // widen the window slightly so sustained harmony dominates transients
+    const f0 = Math.floor((start - beatLen * 0.15) / frameTime);
+    const f1 = Math.ceil((end + beatLen * 0.15) / frameTime);
+    const vec = averageChroma(chroma, f0, f1);
+    const bassVec = averageChroma(bass, f0, f1);
+    let energy = 0;
+    for (const v of vec) energy += v;
+    beatEnergy.push(energy);
+    emissions.push(templateScores(vec, bassVec, scale));
   }
-  const smoothed = smoothLabels(beatChords, beatScores);
 
-  const chords: ChordEvent[] = [];
+  const path = viterbiDecode(emissions, timeSignature, 0.55);
+  const smoothed: string[] = [];
+  const beatScores: number[] = [];
+  for (let i = 0; i < path.length; i++) {
+    const idx = path[i]!;
+    const silent = beatEnergy[i]! < 0.35;
+    smoothed.push(silent ? "N" : TEMPLATES[idx]!.label);
+    beatScores.push(emissions[i]![idx]!);
+  }
+
+  // Merge runs, then absorb any chord shorter than half a bar into its neighbour.
+  let chords: ChordEvent[] = [];
   for (let i = 0; i < smoothed.length; i++) {
     const label = smoothed[i]!;
     const start = beats[i]!;
@@ -458,6 +549,7 @@ export async function analyzeAudioBuffer(
       chords.push({ start, end, label, confidence: beatScores[i]! });
     }
   }
+  chords = absorbShort(chords, beatLen * (timeSignature / 2));
 
   report(100, "Done");
   return {
@@ -467,10 +559,44 @@ export async function analyzeAudioBuffer(
     key: pcToNote(key.pc) + (key.mode === "minor" ? "m" : ""),
     keyPc: key.pc,
     mode: key.mode,
-    timeSignature: 4,
+    timeSignature,
     chords: chords.filter((c) => c.end - c.start > 0.08),
     beatChords: smoothed,
   };
+}
+
+/** Remove chord blips: anything shorter than `minLen` merges into its stronger neighbour. */
+function absorbShort(events: ChordEvent[], minLen: number): ChordEvent[] {
+  if (events.length < 2) return events;
+  let out = events.map((e) => ({ ...e }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < out.length; i++) {
+      const e = out[i]!;
+      if (e.end - e.start >= minLen || out.length === 1) continue;
+      const prev = out[i - 1];
+      const next = out[i + 1];
+      const target =
+        !prev ? next : !next ? prev : next.end - next.start >= prev.end - prev.start ? next : prev;
+      if (!target) continue;
+      target.start = Math.min(target.start, e.start);
+      target.end = Math.max(target.end, e.end);
+      out.splice(i, 1);
+      changed = true;
+      break;
+    }
+    // re-merge identical neighbours created by absorption
+    const merged: ChordEvent[] = [];
+    for (const e of out) {
+      const last = merged[merged.length - 1];
+      if (last && last.label === e.label) last.end = Math.max(last.end, e.end);
+      else merged.push(e);
+    }
+    if (merged.length !== out.length) changed = true;
+    out = merged;
+  }
+  return out;
 }
 
 function tick() {
