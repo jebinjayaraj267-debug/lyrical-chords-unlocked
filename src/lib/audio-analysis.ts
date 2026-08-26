@@ -139,8 +139,6 @@ function buildTemplates(): Template[] {
   }
   return out;
 }
-  return out;
-}
 
 const TEMPLATES = buildTemplates();
 
