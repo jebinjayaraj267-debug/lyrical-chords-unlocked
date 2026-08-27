@@ -407,24 +407,48 @@ function templateScores(
   scale: Set<number> | null,
 ): Float32Array {
   const out = new Float32Array(TEMPLATES.length);
+  let peak = 0;
+  for (let j = 0; j < 12; j++) peak = Math.max(peak, vec[j]!);
+  peak = peak || 1;
+
   for (let i = 0; i < TEMPLATES.length; i++) {
     const t = TEMPLATES[i]!;
     let dot = 0;
     for (let j = 0; j < 12; j++) dot += vec[j]! * t.vec[j]!;
     let s = dot * t.weight;
-    if (bassVec) s += 0.16 * bassVec[t.rootPc]!;
+
+    // Complexity prior: only accept a 4-note chord when its colour tone is
+    // actually strong in the chroma, otherwise a plain triad wins.
+    if (t.intervals.length > 3) {
+      const colour = t.intervals[3]!;
+      const strength = vec[(t.rootPc + colour) % 12]! / peak;
+      s -= 0.09 * (1 - Math.min(1, strength / 0.65));
+    }
+    // Penalise notes the chord claims but the audio does not support.
+    let missing = 0;
+    for (const iv of t.intervals) {
+      if (vec[(t.rootPc + iv) % 12]! / peak < 0.28) missing++;
+    }
+    s -= 0.06 * missing;
+
+    if (bassVec) {
+      let bPeak = 0;
+      for (let j = 0; j < 12; j++) bPeak = Math.max(bPeak, bassVec[j]!);
+      s += 0.22 * (bassVec[t.rootPc]! / (bPeak || 1));
+    }
     if (scale) {
       let outside = 0;
       for (const iv of t.intervals) {
         if (!scale.has((t.rootPc + iv) % 12)) outside++;
       }
-      s -= 0.02 * outside;
-      if (!scale.has(t.rootPc)) s -= 0.03;
+      s -= 0.05 * outside;
+      if (!scale.has(t.rootPc)) s -= 0.06;
     }
     out[i] = s;
   }
   return out;
 }
+
 
 /**
  * Viterbi decoding over beats: emission from chroma matching, transition cost
