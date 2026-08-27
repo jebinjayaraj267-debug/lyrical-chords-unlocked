@@ -95,18 +95,20 @@ class FFT {
 /* ------------------------------------------------------------------ */
 
 const QUALITIES: { suffix: string; intervals: number[]; weight: number }[] = [
+  // Triads are what real chord sheets use; extensions must clearly out-score them.
   { suffix: "", intervals: [0, 4, 7], weight: 1.0 },
   { suffix: "m", intervals: [0, 3, 7], weight: 1.0 },
-  { suffix: "7", intervals: [0, 4, 7, 10], weight: 0.94 },
-  { suffix: "m7", intervals: [0, 3, 7, 10], weight: 0.94 },
-  { suffix: "maj7", intervals: [0, 4, 7, 11], weight: 0.92 },
-  { suffix: "sus4", intervals: [0, 5, 7], weight: 0.88 },
-  { suffix: "sus2", intervals: [0, 2, 7], weight: 0.86 },
-  { suffix: "dim", intervals: [0, 3, 6], weight: 0.84 },
-  { suffix: "aug", intervals: [0, 4, 8], weight: 0.8 },
-  { suffix: "6", intervals: [0, 4, 7, 9], weight: 0.84 },
-  { suffix: "m6", intervals: [0, 3, 7, 9], weight: 0.82 },
+  { suffix: "7", intervals: [0, 4, 7, 10], weight: 0.9 },
+  { suffix: "m7", intervals: [0, 3, 7, 10], weight: 0.89 },
+  { suffix: "maj7", intervals: [0, 4, 7, 11], weight: 0.86 },
+  { suffix: "sus4", intervals: [0, 5, 7], weight: 0.85 },
+  { suffix: "sus2", intervals: [0, 2, 7], weight: 0.83 },
+  { suffix: "dim", intervals: [0, 3, 6], weight: 0.8 },
+  { suffix: "aug", intervals: [0, 4, 8], weight: 0.74 },
+  { suffix: "6", intervals: [0, 4, 7, 9], weight: 0.78 },
+  { suffix: "m6", intervals: [0, 3, 7, 9], weight: 0.76 },
 ];
+
 
 interface Template {
   label: string;
