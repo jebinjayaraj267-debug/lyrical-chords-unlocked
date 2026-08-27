@@ -145,6 +145,18 @@ export function buildSheet(
     perLine[li]!.push({ pos: target, label: c.label, time: c.start });
   }
 
+  // A line with no chord change still has a chord sounding over it — carry the
+  // last one forward so no lyric line is left bare (matches real chord sheets).
+  let carry: SheetChord | null = null;
+  for (let i = 0; i < perLine.length; i++) {
+    const list = perLine[i]!;
+    if (list.length === 0) {
+      if (carry) list.push({ ...carry, pos: 0 });
+    } else {
+      carry = list[list.length - 1]!;
+    }
+  }
+
   // Snap to word starts, drop duplicates that land on the same word, keep spacing legible.
   const laidOut = perLine.map((list, i) => {
     const lyric = allLines[i]!;
@@ -156,10 +168,12 @@ export function buildSheet(
         if (prev.label === c.label && pos <= prev.pos + prev.label.length + 1) continue;
         if (pos <= prev.pos + prev.label.length) pos = prev.pos + prev.label.length + 1;
       }
+      if (pos > lyric.length && placed.length > 0) continue;
       placed.push({ ...c, pos });
     }
     return placed;
   });
+
 
   let idx = 0;
   let romanIdx = 0;
