@@ -95,18 +95,20 @@ class FFT {
 /* ------------------------------------------------------------------ */
 
 const QUALITIES: { suffix: string; intervals: number[]; weight: number }[] = [
+  // Triads are what real chord sheets use; extensions must clearly out-score them.
   { suffix: "", intervals: [0, 4, 7], weight: 1.0 },
   { suffix: "m", intervals: [0, 3, 7], weight: 1.0 },
-  { suffix: "7", intervals: [0, 4, 7, 10], weight: 0.94 },
-  { suffix: "m7", intervals: [0, 3, 7, 10], weight: 0.94 },
-  { suffix: "maj7", intervals: [0, 4, 7, 11], weight: 0.92 },
-  { suffix: "sus4", intervals: [0, 5, 7], weight: 0.88 },
-  { suffix: "sus2", intervals: [0, 2, 7], weight: 0.86 },
-  { suffix: "dim", intervals: [0, 3, 6], weight: 0.84 },
-  { suffix: "aug", intervals: [0, 4, 8], weight: 0.8 },
-  { suffix: "6", intervals: [0, 4, 7, 9], weight: 0.84 },
-  { suffix: "m6", intervals: [0, 3, 7, 9], weight: 0.82 },
+  { suffix: "7", intervals: [0, 4, 7, 10], weight: 0.9 },
+  { suffix: "m7", intervals: [0, 3, 7, 10], weight: 0.89 },
+  { suffix: "maj7", intervals: [0, 4, 7, 11], weight: 0.86 },
+  { suffix: "sus4", intervals: [0, 5, 7], weight: 0.85 },
+  { suffix: "sus2", intervals: [0, 2, 7], weight: 0.83 },
+  { suffix: "dim", intervals: [0, 3, 6], weight: 0.8 },
+  { suffix: "aug", intervals: [0, 4, 8], weight: 0.74 },
+  { suffix: "6", intervals: [0, 4, 7, 9], weight: 0.78 },
+  { suffix: "m6", intervals: [0, 3, 7, 9], weight: 0.76 },
 ];
+
 
 interface Template {
   label: string;
@@ -405,24 +407,48 @@ function templateScores(
   scale: Set<number> | null,
 ): Float32Array {
   const out = new Float32Array(TEMPLATES.length);
+  let peak = 0;
+  for (let j = 0; j < 12; j++) peak = Math.max(peak, vec[j]!);
+  peak = peak || 1;
+
   for (let i = 0; i < TEMPLATES.length; i++) {
     const t = TEMPLATES[i]!;
     let dot = 0;
     for (let j = 0; j < 12; j++) dot += vec[j]! * t.vec[j]!;
     let s = dot * t.weight;
-    if (bassVec) s += 0.16 * bassVec[t.rootPc]!;
+
+    // Complexity prior: only accept a 4-note chord when its colour tone is
+    // actually strong in the chroma, otherwise a plain triad wins.
+    if (t.intervals.length > 3) {
+      const colour = t.intervals[3]!;
+      const strength = vec[(t.rootPc + colour) % 12]! / peak;
+      s -= 0.09 * (1 - Math.min(1, strength / 0.65));
+    }
+    // Penalise notes the chord claims but the audio does not support.
+    let missing = 0;
+    for (const iv of t.intervals) {
+      if (vec[(t.rootPc + iv) % 12]! / peak < 0.28) missing++;
+    }
+    s -= 0.06 * missing;
+
+    if (bassVec) {
+      let bPeak = 0;
+      for (let j = 0; j < 12; j++) bPeak = Math.max(bPeak, bassVec[j]!);
+      s += 0.22 * (bassVec[t.rootPc]! / (bPeak || 1));
+    }
     if (scale) {
       let outside = 0;
       for (const iv of t.intervals) {
         if (!scale.has((t.rootPc + iv) % 12)) outside++;
       }
-      s -= 0.02 * outside;
-      if (!scale.has(t.rootPc)) s -= 0.03;
+      s -= 0.05 * outside;
+      if (!scale.has(t.rootPc)) s -= 0.06;
     }
     out[i] = s;
   }
   return out;
 }
+
 
 /**
  * Viterbi decoding over beats: emission from chroma matching, transition cost
@@ -532,7 +558,7 @@ export async function analyzeAudioBuffer(
     emissions.push(templateScores(vec, bassVec, scale));
   }
 
-  const path = viterbiDecode(emissions, timeSignature, 0.55);
+  const path = viterbiDecode(emissions, timeSignature, 0.34);
   const smoothed: string[] = [];
   const beatScores: number[] = [];
   for (let i = 0; i < path.length; i++) {
@@ -556,7 +582,9 @@ export async function analyzeAudioBuffer(
       chords.push({ start, end, label, confidence: beatScores[i]! });
     }
   }
-  chords = absorbShort(chords, beatLen * (timeSignature / 2));
+  // Real sheets change roughly every 1–2 beats, so only kill sub-beat blips.
+  chords = absorbShort(chords, beatLen * 0.9);
+
 
   report(100, "Done");
   return {
