@@ -558,7 +558,7 @@ export async function analyzeAudioBuffer(
     emissions.push(templateScores(vec, bassVec, scale));
   }
 
-  const path = viterbiDecode(emissions, timeSignature, 0.55);
+  const path = viterbiDecode(emissions, timeSignature, 0.34);
   const smoothed: string[] = [];
   const beatScores: number[] = [];
   for (let i = 0; i < path.length; i++) {
@@ -582,7 +582,9 @@ export async function analyzeAudioBuffer(
       chords.push({ start, end, label, confidence: beatScores[i]! });
     }
   }
-  chords = absorbShort(chords, beatLen * (timeSignature / 2));
+  // Real sheets change roughly every 1–2 beats, so only kill sub-beat blips.
+  chords = absorbShort(chords, beatLen * 0.9);
+
 
   report(100, "Done");
   return {
