@@ -1,7 +1,17 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Link2, Loader2, Mic, Music4, Square, Upload, Wand2 } from "lucide-react";
+import {
+  Cpu,
+  Link2,
+  Loader2,
+  Mic,
+  Music4,
+  Square,
+  TextSearch,
+  Upload,
+  Wand2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +27,9 @@ import {
 } from "@/components/ui/select";
 import { analyzeAudioBuffer, type AnalysisResult } from "@/lib/audio-analysis";
 import { putAudio } from "@/lib/audio-store";
+import { analyzeWithChordMini, type ChordMiniModels } from "@/lib/chordmini";
 import { importLink } from "@/lib/link-import.functions";
+import { fetchSyncedLyrics, type SyncedLine } from "@/lib/lyrics-fetch.functions";
 import { romanizeLyrics } from "@/lib/lyrics.functions";
 import { newId, saveSong } from "@/lib/storage";
 
@@ -52,6 +64,7 @@ function AnalyzePage() {
   const [title, setTitle] = useState("");
   const [artist, setArtist] = useState("");
   const [lyrics, setLyrics] = useState("");
+  const [synced, setSynced] = useState<SyncedLine[]>([]);
   const [style, setStyle] = useState<Style>("auto");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -59,8 +72,12 @@ function AnalyzePage() {
   const [link, setLink] = useState("");
   const [artwork, setArtwork] = useState("");
   const [importing, setImporting] = useState(false);
+  const [fetchingLyrics, setFetchingLyrics] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recSecs, setRecSecs] = useState(0);
+  const [beatModel, setBeatModel] = useState<ChordMiniModels["beatModel"]>("auto");
+  const [chordModel] = useState<ChordMiniModels["chordModel"]>("chord-cnn-lstm");
+  const [useChordMini, setUseChordMini] = useState(true);
 
   useEffect(() => {
     if (!recording) return;
@@ -87,6 +104,36 @@ function AnalyzePage() {
       toast.error(e instanceof Error ? e.message : "Could not read that link");
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function grabLyrics(silent = false): Promise<SyncedLine[]> {
+    if (!title.trim()) {
+      if (!silent) toast.error("Add a title first");
+      return [];
+    }
+    setFetchingLyrics(true);
+    try {
+      const res = await fetchSyncedLyrics({
+        data: { title: title.trim(), ...(artist.trim() ? { artist: artist.trim() } : {}) },
+      });
+      if (!res.found) {
+        if (!silent) toast.error("No lyrics found for that title");
+        return [];
+      }
+      setLyrics(res.plain);
+      setSynced(res.synced);
+      if (!silent) {
+        toast.success(
+          res.synced.length ? "Found time-synced lyrics" : "Found lyrics (no timings available)",
+        );
+      }
+      return res.synced;
+    } catch {
+      if (!silent) toast.error("Lyrics lookup failed");
+      return [];
+    } finally {
+      setFetchingLyrics(false);
     }
   }
 
@@ -120,7 +167,6 @@ function AnalyzePage() {
     }
   }
 
-
   async function run() {
     if (!file) {
       toast.error("Choose an audio file first");
@@ -134,31 +180,64 @@ function AnalyzePage() {
       const ctx = new OfflineAudioContext(1, 1, 22050);
       const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
 
-      // Downsample to 22.05 kHz mono for a faster, cleaner chromagram.
-      const off = new OfflineAudioContext(
-        1,
-        Math.ceil((decoded.duration * 22050) as number),
-        22050,
-      );
-      const src = off.createBufferSource();
-      src.buffer = decoded;
-      src.connect(off.destination);
-      src.start();
-      const mono = await off.startRendering();
+      let analysis: AnalysisResult | null = null;
+      let engine: "chordmini" | "local" = "local";
+      let models: ChordMiniModels | undefined;
 
-      const analysis: AnalysisResult = await analyzeAudioBuffer(mono, {
-        onProgress: (p, s) => {
-          setProgress(Math.min(90, p * 0.9));
-          setStage(s);
-        },
-      });
+      if (useChordMini) {
+        setStage("Analysing with ChordMini");
+        setProgress(15);
+        const outcome = await analyzeWithChordMini(file, decoded.duration, {
+          beatModel,
+          chordModel,
+        });
+        if (outcome.ok) {
+          analysis = outcome.analysis;
+          engine = "chordmini";
+          models = outcome.models;
+          setProgress(85);
+        } else {
+          toast.warning(`${outcome.reason} — analysing on device instead`);
+        }
+      }
+
+      if (!analysis) {
+        // Downsample to 22.05 kHz mono for a faster, cleaner chromagram.
+        const off = new OfflineAudioContext(
+          1,
+          Math.ceil((decoded.duration * 22050) as number),
+          22050,
+        );
+        const src = off.createBufferSource();
+        src.buffer = decoded;
+        src.connect(off.destination);
+        src.start();
+        const mono = await off.startRendering();
+
+        analysis = await analyzeAudioBuffer(mono, {
+          onProgress: (p, s) => {
+            setProgress(Math.min(85, p * 0.85));
+            setStage(s);
+          },
+        });
+      }
+
+      let lyricText = lyrics;
+      let syncedLines = synced;
+      if (!lyricText.trim() && title.trim()) {
+        setStage("Looking up lyrics");
+        setProgress(88);
+        const found = await grabLyrics(true);
+        if (found.length) syncedLines = found;
+        lyricText = found.length ? found.map((l) => l.text).join("\n") : lyricText;
+      }
 
       let romanized = "";
-      if (lyrics.trim() && style !== "english") {
+      if (lyricText.trim() && style !== "english") {
         setStage("Transliterating lyrics");
         setProgress(93);
         try {
-          const res = await romanizeLyrics({ data: { lyrics, style } });
+          const res = await romanizeLyrics({ data: { lyrics: lyricText, style } });
           romanized = res.text;
         } catch (e) {
           toast.warning(e instanceof Error ? e.message : "Transliteration skipped");
@@ -175,15 +254,20 @@ function AnalyzePage() {
         artist: artist.trim(),
         createdAt: Date.now(),
         analysis,
-        lyrics,
+        lyrics: lyricText,
         romanized,
         romanizationStyle: style,
         capo: 0,
         transpose: 0,
         notes: "",
+        engine,
+        ...(models ? { models } : {}),
+        ...(syncedLines.length ? { syncedLyrics: syncedLines } : {}),
       });
       setProgress(100);
-      toast.success("Analysis complete");
+      toast.success(
+        engine === "chordmini" ? "Analysed with ChordMini" : "Analysis complete (on device)",
+      );
       void navigate({ to: "/song/$id", params: { id } });
     } catch (e) {
       console.error(e);
@@ -197,7 +281,7 @@ function AnalyzePage() {
     <div className="mx-auto max-w-lg px-4 pt-6">
       <h1 className="text-2xl font-semibold tracking-tight">Analyze a song</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Everything runs on your device — your audio never leaves the phone.
+        ChordMini handles beat and chord detection, with on-device analysis as backup.
       </p>
 
       <div className="panel mt-5 p-4">
@@ -236,7 +320,6 @@ function AnalyzePage() {
       </div>
 
       <div className="panel mt-4 p-4">
-
         <input
           ref={fileRef}
           type="file"
@@ -277,19 +360,77 @@ function AnalyzePage() {
       </div>
 
       <div className="panel mt-4 p-4">
-        <Label htmlFor="lyrics">Lyrics (optional)</Label>
+        <div className="flex items-center gap-2">
+          <Cpu className="size-4 text-primary" />
+          <Label>Analysis engine</Label>
+        </div>
+        <Select
+          value={useChordMini ? beatModel : "local"}
+          onValueChange={(v) => {
+            if (v === "local") {
+              setUseChordMini(false);
+            } else {
+              setUseChordMini(true);
+              setBeatModel(v as ChordMiniModels["beatModel"]);
+            }
+          }}
+        >
+          <SelectTrigger className="mt-2">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">ChordMini · auto beat model</SelectItem>
+            <SelectItem value="madmom">ChordMini · madmom (fast, 3/4 &amp; 4/4)</SelectItem>
+            <SelectItem value="beat-transformer">
+              ChordMini · beat-transformer (slow, complex mixes)
+            </SelectItem>
+            <SelectItem value="local">On-device only (offline)</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {useChordMini
+            ? "Chords via chord-cnn-lstm. ChordMini allows 2 analyses per minute — if it's busy, the on-device engine takes over automatically."
+            : "Everything runs on your device — your audio never leaves the phone."}
+        </p>
+      </div>
+
+      <div className="panel mt-4 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="lyrics">Lyrics (optional)</Label>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void grabLyrics()}
+            disabled={fetchingLyrics}
+          >
+            {fetchingLyrics ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <TextSearch className="size-4" />
+            )}
+            Fetch lyrics
+          </Button>
+        </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          Paste the lyrics you already have. Add markers like [Verse] or [Chorus] to shape the
-          sheet.
+          Fetch time-synced lyrics by title and artist, or paste your own. Add markers like [Verse]
+          or [Chorus] to shape the sheet.
         </p>
         <Textarea
           id="lyrics"
           value={lyrics}
-          onChange={(e) => setLyrics(e.target.value)}
+          onChange={(e) => {
+            setLyrics(e.target.value);
+            setSynced([]);
+          }}
           rows={7}
           placeholder={"[Verse]\nyour lyric line here\nanother line\n\n[Chorus]\n..."}
           className="mt-2 font-mono text-xs"
         />
+        {synced.length > 0 && (
+          <p className="mt-2 text-xs text-primary">
+            {synced.length} timed lines — chords will align to the exact words.
+          </p>
+        )}
         <div className="mt-3 space-y-1.5">
           <Label>Transliteration</Label>
           <Select value={style} onValueChange={(v) => setStyle(v as Style)}>

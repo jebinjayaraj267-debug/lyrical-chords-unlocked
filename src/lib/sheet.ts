@@ -101,10 +101,74 @@ function snapToWord(line: string, col: number): number {
   return starts.reduce((a, b) => (Math.abs(b - col) < Math.abs(a - col) ? b : a), starts[0]!);
 }
 
+export interface SyncedLyricLine {
+  time: number;
+  text: string;
+}
+
+function normalizeForMatch(s: string) {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/**
+ * Map each lyric line to the timestamped line it corresponds to, in order.
+ * Returns null when too few lines match to trust the timings.
+ */
+function windowsFromSynced(
+  allLines: string[],
+  synced: SyncedLyricLine[],
+  songEnd: number,
+): { from: number; to: number }[] | null {
+  if (synced.length < 2) return null;
+  const times: (number | null)[] = allLines.map(() => null);
+  let si = 0;
+  let matched = 0;
+
+  for (let i = 0; i < allLines.length; i++) {
+    const target = normalizeForMatch(allLines[i]!);
+    if (!target) continue;
+    for (let probe = si; probe < Math.min(synced.length, si + 8); probe++) {
+      const candidate = normalizeForMatch(synced[probe]!.text);
+      if (!candidate) continue;
+      if (candidate === target || candidate.startsWith(target) || target.startsWith(candidate)) {
+        times[i] = synced[probe]!.time;
+        si = probe + 1;
+        matched += 1;
+        break;
+      }
+    }
+  }
+
+  if (matched < Math.max(2, Math.ceil(allLines.length * 0.5))) return null;
+
+  // Fill unmatched lines by interpolating between known anchors.
+  const first = times.findIndex((t) => t !== null);
+  const last = times.length - 1 - [...times].reverse().findIndex((t) => t !== null);
+  for (let i = 0; i < first; i++) times[i] = synced[0]!.time;
+  for (let i = last + 1; i < times.length; i++) times[i] = times[last]!;
+  for (let i = first; i <= last; i++) {
+    if (times[i] !== null) continue;
+    let j = i;
+    while (j <= last && times[j] === null) j += 1;
+    const before = times[i - 1]!;
+    const after = times[j] ?? before;
+    const steps = j - i + 1;
+    for (let k = i; k < j; k++) times[k] = before + ((after - before) * (k - i + 1)) / steps;
+    i = j - 1;
+  }
+
+  const end = Math.max(songEnd, times[last]! + 4);
+  return times.map((t, i) => ({
+    from: t!,
+    to: i + 1 < times.length ? Math.max(t! + 0.2, times[i + 1]!) : end,
+  }));
+}
+
 export function buildSheet(
   analysis: AnalysisResult,
   lyrics: string,
   romanized = "",
+  synced: SyncedLyricLine[] = [],
 ): Sheet {
   const chords = condenseChords(analysis.chords);
   const romanLines = romanized
@@ -118,20 +182,23 @@ export function buildSheet(
   const allLines = blocks.flatMap((b) => b.lines);
   if (allLines.length === 0 || chords.length === 0) return instrumentalSheet(analysis, chords);
 
-  // Each lyric line gets a slice of the song's timeline, weighted by how much
-  // text it holds, so long lines carry more chords than short ones.
-  const weights = allLines.map((l) => Math.max(4, l.trim().length));
-  const totalWeight = weights.reduce((a, b) => a + b, 0);
   const songStart = chords[0]!.start;
   const songEnd = chords[chords.length - 1]!.end;
   const span = Math.max(0.001, songEnd - songStart);
 
-  const windows: { from: number; to: number }[] = [];
-  let acc = 0;
-  for (const w of weights) {
-    const from = songStart + (acc / totalWeight) * span;
-    acc += w;
-    windows.push({ from, to: songStart + (acc / totalWeight) * span });
+  // Prefer real timestamps when we have them; otherwise fall back to slicing
+  // the timeline by how much text each line holds.
+  let windows = windowsFromSynced(allLines, synced, songEnd);
+  if (!windows) {
+    const weights = allLines.map((l) => Math.max(4, l.trim().length));
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    windows = [];
+    let acc = 0;
+    for (const w of weights) {
+      const from = songStart + (acc / totalWeight) * span;
+      acc += w;
+      windows.push({ from, to: songStart + (acc / totalWeight) * span });
+    }
   }
 
   const perLine: SheetChord[][] = allLines.map(() => []);

@@ -19,6 +19,12 @@ export interface Song {
   capo: number;
   transpose: number;
   notes: string;
+  /** which engine produced the analysis */
+  engine?: "chordmini" | "local";
+  /** ChordMini models used, when engine === "chordmini" */
+  models?: { beatModel: string; chordModel: string };
+  /** time-synced lyric lines (LRCLIB), used for exact chord placement */
+  syncedLyrics?: { time: number; text: string }[];
 }
 
 const KEY = "chordlab.songs.v1";
