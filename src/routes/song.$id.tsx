@@ -90,7 +90,10 @@ function SongPage() {
   }, [scrollSpeed]);
 
   const sheet = useMemo(
-    () => (song ? buildSheet(song.analysis, song.lyrics, song.romanized) : null),
+    () =>
+      song
+        ? buildSheet(song.analysis, song.lyrics, song.romanized, song.syncedLyrics ?? [])
+        : null,
     [song],
   );
 
