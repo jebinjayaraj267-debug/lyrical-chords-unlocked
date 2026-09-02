@@ -875,13 +875,29 @@ export async function analyzeAudioBuffer(
     beats = [];
     for (let t = 0; t < duration; t += 60 / bpmEstimate) beats.push(Math.round(t * 1000) / 1000);
   }
-  if (beats[0]! > 0.05) beats.unshift(0);
   // Refine BPM from the tracked inter-beat intervals.
   const ibis: number[] = [];
   for (let i = 1; i < beats.length; i++) ibis.push(beats[i]! - beats[i - 1]!);
   const medIbi = median(ibis);
-  const bpm = Math.round(medIbi > 0.15 ? 60 / medIbi : bpmEstimate);
-  const beatLen = medIbi > 0.15 ? medIbi : 60 / bpm;
+  const beatLen = medIbi > 0.15 && medIbi < 2 ? medIbi : 60 / bpmEstimate;
+  const bpm = Math.round(60 / beatLen);
+
+  // The DP backtrace only spans the region it locked onto; continue the pulse
+  // at the measured period so the whole song has a beat grid.
+  beats = beats.filter((t) => t >= 0 && t <= duration);
+  if (beats.length === 0) beats.push(0);
+  const filled: number[] = [];
+  for (let t = beats[0]! - beatLen; t > 0.02; t -= beatLen) filled.push(t);
+  filled.reverse();
+  for (let i = 0; i < beats.length; i++) {
+    filled.push(beats[i]!);
+    const next = beats[i + 1];
+    if (next !== undefined) {
+      for (let t = beats[i]! + beatLen; next - t > beatLen * 0.6; t += beatLen) filled.push(t);
+    }
+  }
+  for (let t = filled[filled.length - 1]! + beatLen; t < duration; t += beatLen) filled.push(t);
+  beats = filled.map((t) => Math.round(t * 1000) / 1000).sort((a, b) => a - b);
 
   report(76, "Recognising chords");
   await tick();
