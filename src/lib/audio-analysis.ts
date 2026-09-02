@@ -915,7 +915,10 @@ export async function analyzeAudioBuffer(
   const firstLabels = firstPass.map((idx) => TEMPLATES[idx]!.label);
   const chordKey = keyFromChords(firstLabels, beatEnergy);
   const chromaKey = estimateKey(beatChroma);
-  const key = chordKey.pc === chromaKey.pc || chordKey.mode === chromaKey.mode ? chordKey : chordKey;
+  // Trust the decoded chord track, but fall back to the chroma key when the
+  // first pass produced almost no harmonic information.
+  const decodedChords = firstLabels.filter((l) => l !== "N").length;
+  const key = decodedChords >= 8 ? chordKey : chromaKey;
   const scale = scaleOf(key.pc, key.mode);
 
   const emissions = beatChroma.map((vec, i) => templateScores(vec, beatBass[i]!, scale));
