@@ -447,6 +447,45 @@ function movingAverage(x: Float32Array, w: number): Float32Array {
   return out;
 }
 
+/**
+ * High-resolution onset novelty for beat tracking. The chroma front end runs at
+ * a 93 ms hop, far too coarse to place beats; this uses a short window with a
+ * ~12 ms hop and log-compressed spectral flux (Boeck/Mueller), which is what
+ * modern beat trackers feed their DP stage.
+ */
+const FINE_FRAME = 1024;
+const FINE_HOP = 256;
+
+function fineNovelty(
+  signal: Float32Array,
+  sampleRate: number,
+): { nov: Float32Array; frameTime: number } {
+  const fft = new FFT(FINE_FRAME);
+  const win = hann(FINE_FRAME);
+  const bins = FINE_FRAME / 2;
+  const nFrames = Math.max(1, Math.floor((signal.length - FINE_FRAME) / FINE_HOP) + 1);
+  const flux = new Float32Array(nFrames);
+  const frame = new Float32Array(FINE_FRAME);
+  let prev: Float32Array | null = null;
+  for (let f = 0; f < nFrames; f++) {
+    const off = f * FINE_HOP;
+    for (let i = 0; i < FINE_FRAME; i++) frame[i] = (signal[off + i] ?? 0) * win[i]!;
+    const raw = fft.magnitude(frame);
+    const comp = new Float32Array(bins);
+    for (let b = 0; b < bins; b++) comp[b] = Math.log1p(raw[b]! * 20);
+    if (prev) {
+      let s = 0;
+      for (let b = 1; b < bins; b++) {
+        const d = comp[b]! - prev[b]!;
+        if (d > 0) s += d;
+      }
+      flux[f] = s;
+    }
+    prev = comp;
+  }
+  return { nov: noveltyCurve(flux), frameTime: FINE_HOP / sampleRate };
+}
+
 function noveltyCurve(onset: Float32Array): Float32Array {
   const mean = movingAverage(onset, 32);
   const nov = new Float32Array(onset.length);
@@ -955,23 +994,18 @@ export async function analyzeAudioBuffer(
 
   report(66, "Tracking beats");
   await tick();
-  // Percussive novelty gives a much cleaner beat than raw flux.
-  const percNov = new Float32Array(percussive.length);
-  for (let t = 1; t < percussive.length; t++) {
-    let flux = 0;
-    for (let k = 0; k < N_LOG; k++) {
-      const d = percussive[t]![k]! - percussive[t - 1]![k]!;
-      if (d > 0) flux += d;
-    }
-    percNov[t] = flux;
-  }
-  let nov = noveltyCurve(percNov);
+  // Fine-hop novelty for beat placement; fall back to the coarse flux if the
+  // track is so quiet that the short-window analysis finds nothing.
+  let { nov, frameTime: novTime } = fineNovelty(signal, sampleRate);
   let novEnergy = 0;
   for (const v of nov) novEnergy += v;
-  if (novEnergy < 1) nov = noveltyCurve(onset);
+  if (novEnergy < 1) {
+    nov = noveltyCurve(onset);
+    novTime = frameTime;
+  }
 
-  const bpmEstimate = estimateTempo(nov, frameTime);
-  let beats = trackBeats(nov, frameTime, bpmEstimate);
+  const bpmEstimate = estimateTempo(nov, novTime);
+  let beats = trackBeats(nov, novTime, bpmEstimate);
   if (beats.length < 8) {
     beats = [];
     for (let t = 0; t < duration; t += 60 / bpmEstimate) beats.push(Math.round(t * 1000) / 1000);
@@ -1022,7 +1056,7 @@ export async function analyzeAudioBuffer(
     let energy = 0;
     for (const v of averageChroma(chroma, f0, f1)) energy += v;
     beatEnergy.push(energy);
-    beatStrength.push(nov[Math.min(nov.length - 1, Math.round(start / frameTime))] ?? 0);
+    beatStrength.push(nov[Math.min(nov.length - 1, Math.round(start / novTime))] ?? 0);
   }
 
   report(80, "Matching repeated sections");
