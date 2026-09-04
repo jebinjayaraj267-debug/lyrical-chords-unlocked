@@ -975,7 +975,7 @@ export async function analyzeAudioBuffer(
 
   report(34, "Separating harmonic and percussive layers");
   await tick();
-  const { harmonic, percussive } = hpss(logSpec);
+  const { harmonic } = hpss(logSpec);
 
   report(46, "Correcting tuning");
   await tick();
