@@ -410,12 +410,25 @@ function chromaFromNotes(notes: Float32Array, loMidi: number, hiMidi: number): F
     if (midi < loMidi || midi > hiMidi) continue;
     out[midi % 12] = out[midi % 12]! + notes[n]!;
   }
+  // Normalise, then log-compress (Mueller) and strip the noise floor so
+  // spectral leakage cannot masquerade as extra chord tones.
   let max = 0;
+  for (let i = 0; i < 12; i++) if (out[i]! > max) max = out[i]!;
+  if (max <= 0) return out;
+  const gamma = 10;
+  const denom = Math.log1p(gamma);
+  const vals: number[] = [];
   for (let i = 0; i < 12; i++) {
-    out[i] = Math.log1p(out[i]! * 8);
-    if (out[i]! > max) max = out[i]!;
+    out[i] = Math.log1p((out[i]! / max) * gamma) / denom;
+    vals.push(out[i]!);
   }
-  if (max > 0) for (let i = 0; i < 12; i++) out[i] = out[i]! / max;
+  const floor = median(vals);
+  let peak = 0;
+  for (let i = 0; i < 12; i++) {
+    out[i] = Math.max(0, out[i]! - floor * 0.9);
+    if (out[i]! > peak) peak = out[i]!;
+  }
+  if (peak > 0) for (let i = 0; i < 12; i++) out[i] = out[i]! / peak;
   return out;
 }
 
