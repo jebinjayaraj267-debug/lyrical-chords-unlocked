@@ -704,7 +704,7 @@ function cosine(a: Float32Array, b: Float32Array): number {
  * chroma with the most similar beats found elsewhere in the track. This is one
  * of the largest published accuracy gains for template/HMM chord recognition.
  */
-function recurrenceSmooth(vecs: Float32Array[], k = 6, exclude = 4): Float32Array[] {
+function recurrenceSmooth(vecs: Float32Array[], k = 4, exclude = 8): Float32Array[] {
   const n = vecs.length;
   if (n < 32) return vecs.map((v) => Float32Array.from(v));
   const out: Float32Array[] = [];
@@ -720,8 +720,8 @@ function recurrenceSmooth(vecs: Float32Array[], k = 6, exclude = 4): Float32Arra
     let wsum = 1;
     for (let m = 0; m < Math.min(k, cands.length); m++) {
       const c = cands[m]!;
-      if (c.s < 0.85) break;
-      const w = c.s * 0.5;
+      if (c.s < 0.92) break;
+      const w = c.s * 0.35;
       const v = vecs[c.j]!;
       for (let d = 0; d < 12; d++) acc[d] = acc[d]! + v[d]! * w;
       wsum += w;
@@ -988,7 +988,7 @@ export async function analyzeAudioBuffer(
   for (let t = 0; t < harmonic.length; t++) {
     const notes = noteSalience(harmonic[t]!, tuning);
     chroma.push(chromaFromNotes(notes, 40, 96));
-    bassChroma.push(chromaFromNotes(notes, MIDI_LO, 52));
+    bassChroma.push(chromaFromNotes(notes, MIDI_LO, 55));
     if (t % 400 === 0) await tick();
   }
 
