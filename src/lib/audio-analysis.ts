@@ -1015,8 +1015,8 @@ export async function analyzeAudioBuffer(
   report(80, "Matching repeated sections");
   await tick();
   // Structure-aware (recurrence-plot) smoothing, then a mild local blur.
-  const beatChroma = temporalSmooth(recurrenceSmooth(rawBeatChroma));
-  const beatBass = temporalSmooth(recurrenceSmooth(rawBeatBass), 0.25);
+  const beatChroma = rawBeatChroma;
+  const beatBass = rawBeatBass;
 
   report(84, "Recognising chords");
   await tick();
