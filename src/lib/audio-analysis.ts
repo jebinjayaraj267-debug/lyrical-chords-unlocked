@@ -616,6 +616,94 @@ function averageChroma(chroma: Float32Array[], from: number, to: number): Float3
   return out;
 }
 
+/** Per-bin median over a frame range — robust to transients and passing notes. */
+function medianChroma(chroma: Float32Array[], from: number, to: number): Float32Array {
+  const a = Math.max(0, from);
+  const b = Math.min(chroma.length, Math.max(a + 1, to));
+  const out = new Float32Array(12);
+  if (b <= a) return out;
+  const scratch: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    scratch.length = 0;
+    for (let f = a; f < b; f++) scratch.push(chroma[f]![i]!);
+    out[i] = median(scratch);
+  }
+  let norm = 0;
+  for (const v of out) norm += v * v;
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < 12; i++) out[i] = out[i]! / norm;
+  return out;
+}
+
+function cosine(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < 12; i++) {
+    dot += a[i]! * b[i]!;
+    na += a[i]! * a[i]!;
+    nb += b[i]! * b[i]!;
+  }
+  return dot / (Math.sqrt(na * nb) || 1);
+}
+
+/**
+ * Recurrence-plot smoothing (Cho & Bello): songs repeat, so average each beat's
+ * chroma with the most similar beats found elsewhere in the track. This is one
+ * of the largest published accuracy gains for template/HMM chord recognition.
+ */
+function recurrenceSmooth(vecs: Float32Array[], k = 6, exclude = 4): Float32Array[] {
+  const n = vecs.length;
+  if (n < 32) return vecs.map((v) => Float32Array.from(v));
+  const out: Float32Array[] = [];
+  const cands: { j: number; s: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    cands.length = 0;
+    for (let j = 0; j < n; j++) {
+      if (Math.abs(j - i) <= exclude) continue;
+      cands.push({ j, s: cosine(vecs[i]!, vecs[j]!) });
+    }
+    cands.sort((x, y) => y.s - x.s);
+    const acc = Float32Array.from(vecs[i]!);
+    let wsum = 1;
+    for (let m = 0; m < Math.min(k, cands.length); m++) {
+      const c = cands[m]!;
+      if (c.s < 0.85) break;
+      const w = c.s * 0.5;
+      const v = vecs[c.j]!;
+      for (let d = 0; d < 12; d++) acc[d] = acc[d]! + v[d]! * w;
+      wsum += w;
+    }
+    let norm = 0;
+    for (let d = 0; d < 12; d++) {
+      acc[d] = acc[d]! / wsum;
+      norm += acc[d]! * acc[d]!;
+    }
+    norm = Math.sqrt(norm) || 1;
+    for (let d = 0; d < 12; d++) acc[d] = acc[d]! / norm;
+    out.push(acc);
+  }
+  return out;
+}
+
+/** Mild temporal blur across neighbouring beats (harmony is locally stable). */
+function temporalSmooth(vecs: Float32Array[], w = 0.35): Float32Array[] {
+  return vecs.map((v, i) => {
+    const acc = Float32Array.from(v);
+    const prev = vecs[i - 1];
+    const next = vecs[i + 1];
+    for (let d = 0; d < 12; d++) {
+      acc[d] = acc[d]! + (prev ? prev[d]! * w : 0) + (next ? next[d]! * w : 0);
+    }
+    let norm = 0;
+    for (const x of acc) norm += x * x;
+    norm = Math.sqrt(norm) || 1;
+    for (let d = 0; d < 12; d++) acc[d] = acc[d]! / norm;
+    return acc;
+  });
+}
+
+
 function matchChord(vec: Float32Array): { label: string; score: number } {
   const scores = templateScores(vec, null, null);
   let best = { label: "N", score: -Infinity };
