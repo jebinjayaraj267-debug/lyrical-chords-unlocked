@@ -991,8 +991,8 @@ export async function analyzeAudioBuffer(
   await tick();
   // Beat-synchronous chroma with a small pre/post window so sustained harmony
   // dominates the attack transient.
-  const beatChroma: Float32Array[] = [];
-  const beatBass: Float32Array[] = [];
+  const rawBeatChroma: Float32Array[] = [];
+  const rawBeatBass: Float32Array[] = [];
   const beatEnergy: number[] = [];
   const beatStrength: number[] = [];
   for (let i = 0; i < beats.length; i++) {
@@ -1001,15 +1001,25 @@ export async function analyzeAudioBuffer(
     const span = Math.max(0.05, end - start);
     const f0 = Math.floor((start + span * 0.1) / frameTime);
     const f1 = Math.ceil((end + span * 0.1) / frameTime);
-    const vec = averageChroma(chroma, f0, f1);
-    beatChroma.push(vec);
-    beatBass.push(averageChroma(bassChroma, f0, f1));
+    // Median over the beat is far more robust than the mean to attacks,
+    // melody notes and percussion leakage.
+    const vec = medianChroma(chroma, f0, f1);
+    rawBeatChroma.push(vec);
+    rawBeatBass.push(medianChroma(bassChroma, f0, f1));
     let energy = 0;
-    for (const v of vec) energy += v;
+    for (const v of averageChroma(chroma, f0, f1)) energy += v;
     beatEnergy.push(energy);
     beatStrength.push(nov[Math.min(nov.length - 1, Math.round(start / frameTime))] ?? 0);
   }
 
+  report(80, "Matching repeated sections");
+  await tick();
+  // Structure-aware (recurrence-plot) smoothing, then a mild local blur.
+  const beatChroma = temporalSmooth(recurrenceSmooth(rawBeatChroma));
+  const beatBass = temporalSmooth(recurrenceSmooth(rawBeatBass), 0.25);
+
+  report(84, "Recognising chords");
+  await tick();
   // Pass 1: no key prior.
   const rawEmissions = beatChroma.map((vec, i) => templateScores(vec, beatBass[i]!, null));
   const metre = estimateMetre(rawEmissions, beatStrength);
@@ -1027,6 +1037,7 @@ export async function analyzeAudioBuffer(
 
   const emissions = beatChroma.map((vec, i) => templateScores(vec, beatBass[i]!, scale));
   const path = viterbiDecode(emissions, metre.beatsPerBar, metre.offset, 0.32);
+
 
   report(90, "Cleaning up");
   await tick();
