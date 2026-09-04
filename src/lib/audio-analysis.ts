@@ -720,8 +720,8 @@ function recurrenceSmooth(vecs: Float32Array[], k = 4, exclude = 8): Float32Arra
     let wsum = 1;
     for (let m = 0; m < Math.min(k, cands.length); m++) {
       const c = cands[m]!;
-      if (c.s < 0.92) break;
-      const w = c.s * 0.35;
+      if (c.s < 0.95) break;
+      const w = c.s * 0.3;
       const v = vecs[c.j]!;
       for (let d = 0; d < 12; d++) acc[d] = acc[d]! + v[d]! * w;
       wsum += w;
@@ -804,6 +804,17 @@ function templateScores(
       if (vec[(t.rootPc + iv) % 12]! / peak < 0.28) missing++;
     }
     s -= 0.06 * missing;
+
+    // Penalise strong pitches the chord does not contain, so a subset chord
+    // (Am) cannot win over the chord that actually explains the audio (C).
+    const inChord = new Set(t.intervals.map((iv) => (t.rootPc + iv) % 12));
+    let extra = 0;
+    for (let j = 0; j < 12; j++) {
+      if (inChord.has(j)) continue;
+      const rel = vec[j]! / peak;
+      if (rel > 0.45) extra += rel - 0.45;
+    }
+    s -= 0.34 * extra;
 
     if (bassVec) {
       let bPeak = 0;
