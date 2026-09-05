@@ -1081,7 +1081,7 @@ export async function analyzeAudioBuffer(
   // Pass 1: no key prior.
   const rawEmissions = beatChroma.map((vec, i) => templateScores(vec, beatBass[i]!, null));
   const metre = estimateMetre(rawEmissions, beatStrength);
-  const firstPass = viterbiDecode(rawEmissions, metre.beatsPerBar, metre.offset, 0.3);
+  const firstPass = viterbiDecode(rawEmissions, metre.beatsPerBar, metre.offset, 0.22);
 
   // Pass 2: condition on the key implied by pass 1.
   const firstLabels = firstPass.map((idx) => TEMPLATES[idx]!.label);
@@ -1094,7 +1094,7 @@ export async function analyzeAudioBuffer(
   const scale = scaleOf(key.pc, key.mode);
 
   const emissions = beatChroma.map((vec, i) => templateScores(vec, beatBass[i]!, scale));
-  const path = viterbiDecode(emissions, metre.beatsPerBar, metre.offset, 0.32);
+  const path = viterbiDecode(emissions, metre.beatsPerBar, metre.offset, 0.24);
 
 
   report(90, "Cleaning up");
