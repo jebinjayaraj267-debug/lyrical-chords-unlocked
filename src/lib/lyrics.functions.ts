@@ -2,6 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { streamText } from "ai";
 import { z } from "zod";
 
+import { hasTamil, tanglishGlossary, transliterateTamilText } from "./translit";
+
+
 const Input = z.object({
   lyrics: z.string().min(1),
   style: z.enum(["hinglish", "tanglish", "auto", "english"]),
@@ -24,12 +27,21 @@ const STYLE_PROMPT: Record<string, string> = {
 export const romanizeLyrics = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => Input.parse(input))
   .handler(async ({ data }) => {
+    const tamil = hasTamil(data.lyrics) && data.style !== "english";
+    const offline = () => (tamil ? { text: transliterateTamilText(data.lyrics) } : null);
+
     const apiKey = process.env["LOVABLE_API_KEY"];
-    if (!apiKey) throw new Error("AI is not configured for this app.");
+    if (!apiKey) {
+      const fallback = offline();
+      if (fallback) return fallback;
+      throw new Error("AI is not configured for this app.");
+    }
 
     const gateway = (
       await import("./ai-gateway.server")
     ).createLovableAiGatewayProvider(apiKey);
+
+    const glossary = tamil ? tanglishGlossary(data.lyrics) : [];
 
     const system = [
       "You are a transliteration engine for song lyrics that the user already has.",
@@ -37,7 +49,12 @@ export const romanizeLyrics = createServerFn({ method: "POST" })
       "Rules: output ONLY the converted text. Preserve the exact number of lines and the line order.",
       "Preserve blank lines and section markers such as [Verse] or [Chorus] exactly as given.",
       "Do not translate unless asked, do not add commentary, do not add or remove lines.",
-    ].join(" ");
+      glossary.length
+        ? `Use exactly these Roman spellings for the Tamil words listed (they come from a Tamil songbook and are authoritative): ${glossary.join("; ")}.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     try {
       const result = streamText({
@@ -46,8 +63,15 @@ export const romanizeLyrics = createServerFn({ method: "POST" })
         prompt: data.lyrics,
       });
       const text = await result.text;
-      return { text: text.trim() };
+      const trimmed = text.trim();
+      if (!trimmed) {
+        const fallback = offline();
+        if (fallback) return fallback;
+      }
+      return { text: trimmed };
     } catch (error) {
+      const fallback = offline();
+      if (fallback) return fallback;
       const status = (error as { statusCode?: number; status?: number })?.statusCode ??
         (error as { status?: number })?.status;
       if (status === 429) throw new Error("Too many requests right now — try again in a moment.");
@@ -55,3 +79,4 @@ export const romanizeLyrics = createServerFn({ method: "POST" })
       throw new Error("Transliteration failed. Please try again.");
     }
   });
+
