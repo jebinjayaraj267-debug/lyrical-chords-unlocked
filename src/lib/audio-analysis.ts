@@ -105,8 +105,8 @@ const QUALITIES: { suffix: string; intervals: number[]; weight: number }[] = [
   { suffix: "sus2", intervals: [0, 2, 7], weight: 0.83 },
   { suffix: "dim", intervals: [0, 3, 6], weight: 0.8 },
   { suffix: "aug", intervals: [0, 4, 8], weight: 0.74 },
-  { suffix: "6", intervals: [0, 4, 7, 9], weight: 0.78 },
-  { suffix: "m6", intervals: [0, 3, 7, 9], weight: 0.76 },
+  { suffix: "6", intervals: [0, 4, 7, 9], weight: 0.7 },
+  { suffix: "m6", intervals: [0, 3, 7, 9], weight: 0.68 },
 ];
 
 interface Template {
@@ -819,7 +819,7 @@ function templateScores(
     if (bassVec) {
       let bPeak = 0;
       for (let j = 0; j < 12; j++) bPeak = Math.max(bPeak, bassVec[j]!);
-      s += 0.26 * (bassVec[t.rootPc]! / (bPeak || 1));
+      s += 0.34 * (bassVec[t.rootPc]! / (bPeak || 1));
     }
     if (scale) {
       let outside = 0;
@@ -1081,7 +1081,7 @@ export async function analyzeAudioBuffer(
   // Pass 1: no key prior.
   const rawEmissions = beatChroma.map((vec, i) => templateScores(vec, beatBass[i]!, null));
   const metre = estimateMetre(rawEmissions, beatStrength);
-  const firstPass = viterbiDecode(rawEmissions, metre.beatsPerBar, metre.offset, 0.3);
+  const firstPass = viterbiDecode(rawEmissions, metre.beatsPerBar, metre.offset, 0.22);
 
   // Pass 2: condition on the key implied by pass 1.
   const firstLabels = firstPass.map((idx) => TEMPLATES[idx]!.label);
@@ -1094,7 +1094,7 @@ export async function analyzeAudioBuffer(
   const scale = scaleOf(key.pc, key.mode);
 
   const emissions = beatChroma.map((vec, i) => templateScores(vec, beatBass[i]!, scale));
-  const path = viterbiDecode(emissions, metre.beatsPerBar, metre.offset, 0.32);
+  const path = viterbiDecode(emissions, metre.beatsPerBar, metre.offset, 0.24);
 
 
   report(90, "Cleaning up");
