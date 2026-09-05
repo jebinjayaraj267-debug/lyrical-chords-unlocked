@@ -2,6 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { streamText } from "ai";
 import { z } from "zod";
 
+import { hasTamil, tanglishGlossary, transliterateTamilText } from "./translit";
+
+
 const Input = z.object({
   lyrics: z.string().min(1),
   style: z.enum(["hinglish", "tanglish", "auto", "english"]),
