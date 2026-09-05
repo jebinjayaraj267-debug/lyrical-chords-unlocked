@@ -105,8 +105,8 @@ const QUALITIES: { suffix: string; intervals: number[]; weight: number }[] = [
   { suffix: "sus2", intervals: [0, 2, 7], weight: 0.83 },
   { suffix: "dim", intervals: [0, 3, 6], weight: 0.8 },
   { suffix: "aug", intervals: [0, 4, 8], weight: 0.74 },
-  { suffix: "6", intervals: [0, 4, 7, 9], weight: 0.78 },
-  { suffix: "m6", intervals: [0, 3, 7, 9], weight: 0.76 },
+  { suffix: "6", intervals: [0, 4, 7, 9], weight: 0.7 },
+  { suffix: "m6", intervals: [0, 3, 7, 9], weight: 0.68 },
 ];
 
 interface Template {
@@ -819,7 +819,7 @@ function templateScores(
     if (bassVec) {
       let bPeak = 0;
       for (let j = 0; j < 12; j++) bPeak = Math.max(bPeak, bassVec[j]!);
-      s += 0.26 * (bassVec[t.rootPc]! / (bPeak || 1));
+      s += 0.34 * (bassVec[t.rootPc]! / (bPeak || 1));
     }
     if (scale) {
       let outside = 0;
