@@ -174,7 +174,8 @@ export class StudioPlayer {
     const start = () => {
       if (!this.playing) return;
       for (const t of this.tracks.values()) {
-        const shifter = new Shifter(this.ctx, t.buffer, 4096)!;
+        const shifter = new Shifter(this.ctx, t.buffer, 4096);
+        if (!shifter) continue;
         shifter.tempo = this.tempo;
         shifter.pitchSemitones = this.semitones;
         shifter.percentagePlayed = this.duration ? this.position / this.duration : 0;
