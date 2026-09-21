@@ -20,6 +20,7 @@ import { Slider } from "@/components/ui/slider";
 import { ChordDiagram } from "@/components/ChordDiagram";
 import { ChordSheetView } from "@/components/ChordSheetView";
 import { InstrumentPicker } from "@/components/InstrumentPicker";
+import { StudioPanel } from "@/components/StudioPanel";
 import { getAudio, deleteAudio } from "@/lib/audio-store";
 import { downloadSheetImage, downloadSheetPdf, downloadText } from "@/lib/export";
 import { useInstrument } from "@/lib/prefs";
@@ -260,6 +261,8 @@ function SongPage() {
           />
         </div>
       )}
+
+      <StudioPanel song={song} />
 
       {/* Chord shapes */}
       <div className="panel mt-4 p-4">

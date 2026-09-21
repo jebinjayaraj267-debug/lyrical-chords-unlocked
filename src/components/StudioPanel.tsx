@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Flag,
   Gauge,
@@ -397,10 +397,10 @@ function Row({
   value,
   children,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   value?: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
