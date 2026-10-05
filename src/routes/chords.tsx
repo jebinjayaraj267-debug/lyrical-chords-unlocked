@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ChordDiagram } from "@/components/ChordDiagram";
 import { InstrumentPicker } from "@/components/InstrumentPicker";
@@ -13,6 +13,7 @@ import {
   voicingsFor,
 } from "@/lib/instruments";
 import { useInstrument } from "@/lib/prefs";
+import { fetchCatalogChord, type CatalogChord } from "@/lib/chords-api";
 
 export const Route = createFileRoute("/chords")({
   head: () => ({
@@ -43,6 +44,7 @@ function ChordLibraryPage() {
 
   const inst = getInstrument(instrument);
   const chord = root + quality;
+  const [catalogChord, setCatalogChord] = useState<CatalogChord | null>(null);
 
   const results = useMemo(() => {
     const term = q.trim();
@@ -59,6 +61,17 @@ function ChordLibraryPage() {
     [chord, inst],
   );
   const keys = inst.kind === "keys" ? pianoNotes(chord) : null;
+
+  useEffect(() => {
+    let active = true;
+    setCatalogChord(null);
+    void fetchCatalogChord(chord).then((result) => {
+      if (active) setCatalogChord(result);
+    });
+    return () => {
+      active = false;
+    };
+  }, [chord]);
 
   return (
     <div className="mx-auto max-w-lg px-4 pt-6">
@@ -138,6 +151,22 @@ function ChordLibraryPage() {
               <span className="text-xs text-muted-foreground">{inst.name}</span>
             </div>
 
+            {catalogChord && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Catalog: {catalogChord.name?.eng ?? chord}
+                {catalogChord.notes?.length
+                  ? ` · ${catalogChord.notes
+                      .map((note) => {
+                        if (typeof note === "string") return note;
+                        if (typeof note.name === "string") return note.name;
+                        return note.name?.eng;
+                      })
+                      .filter(Boolean)
+                      .join(", ")}`
+                  : ""}
+              </p>
+            )}
+
             {inst.kind === "keys" ? (
               <div className="mt-4 flex flex-col items-center gap-2">
                 <ChordDiagram chord={chord} instrument={instrument} size={140} showLabel={false} />
@@ -168,7 +197,9 @@ function ChordLibraryPage() {
           </div>
 
           <div className="panel mt-4 p-4">
-            <h2 className="text-sm font-semibold">All {LIBRARY_QUALITIES.find((x) => x.id === quality)?.name.toLowerCase()} chords</h2>
+            <h2 className="text-sm font-semibold">
+              All {LIBRARY_QUALITIES.find((x) => x.id === quality)?.name.toLowerCase()} chords
+            </h2>
             <div className="mt-3 grid grid-cols-3 gap-3">
               {LIBRARY_ROOTS.map((r) => (
                 <button

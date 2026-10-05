@@ -24,3 +24,11 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+## Server configuration
+
+Chord analysis uses `https://chordmini.me` by default. The public service may require a short-lived `CHORDMINI_APP_CHECK_TOKEN`; set that server secret when needed. Alternatively, set `CHORDMINI_API_URL` to a self-hosted ChordMiniApp backend, for example `http://localhost:5001`, which avoids the public App Check requirement.
+
+Stem separation runs [Demucs](https://github.com/facebookresearch/demucs) on a Node server with access to Python. Install the requested repository with `python3 -m pip install -U git+https://github.com/facebookresearch/demucs.git`, then make sure the server can run `python3 -m demucs.separate`. The app returns a ZIP of vocals, drums, bass and other stems, which it unpacks locally. Set `DEMUCS_PYTHON` or `DEMUCS_MODEL` when using a different Python environment or model. A Cloudflare-only deployment cannot run local Demucs; use a separate Demucs worker and set the API route to forward to it.
+
+Copy `.env.example` to `.env` for local development. For a deployed app, add `ELEVENLABS_API_KEY` as a server-side secret in the hosting provider; never expose it as a `VITE_` variable.

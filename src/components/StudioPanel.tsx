@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { getAudio, putAudio } from "@/lib/audio-store";
-import { fetchStem, pollSeparation, startSeparation, stemUrls } from "@/lib/separate";
+import { startSeparation } from "@/lib/separate";
 import { STEMS, STEM_LABELS, StudioPlayer, type TrackName } from "@/lib/studio";
 import type { Song } from "@/lib/storage";
 
@@ -134,27 +134,11 @@ export function StudioPanel({ song }: { song: Song }) {
     setSeparating(true);
     setSepStage("Uploading");
     try {
-      const id = await startSeparation(blob);
       setSepStage("Separating (this can take a few minutes)");
-      let output: Record<string, string> | null = null;
-      for (let i = 0; i < 300; i++) {
-        await new Promise((r) => setTimeout(r, 4000));
-        const res = await pollSeparation(id);
-        if (res.status === "succeeded") {
-          output = res.output;
-          break;
-        }
-        if (res.status === "failed" || res.status === "canceled") {
-          throw new Error(res.error ?? "Separation failed");
-        }
-      }
-      if (!output) throw new Error("Separation timed out");
-
-      setSepStage("Downloading tracks");
+      const separated = await startSeparation(blob);
       const player = playerRef.current;
       const loaded: TrackName[] = ["full"];
-      for (const { name, url } of stemUrls(output)) {
-        const stemBlob = await fetchStem(url);
+      for (const { name, blob: stemBlob } of separated) {
         await putAudio(`${song.id}::${name}`, stemBlob);
         await player?.load(name, stemBlob);
         loaded.push(name);
@@ -343,7 +327,12 @@ export function StudioPanel({ song }: { song: Song }) {
                 <Headphones className="size-4 text-muted-foreground" /> Tracks
               </span>
               {!hasStems && (
-                <Button size="sm" variant="secondary" disabled={separating} onClick={() => void separate()}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={separating}
+                  onClick={() => void separate()}
+                >
                   {separating ? <Loader2 className="size-4 animate-spin" /> : null}
                   {separating ? "Separating…" : "Separate vocals & instruments"}
                 </Button>
@@ -365,7 +354,11 @@ export function StudioPanel({ song }: { song: Song }) {
                         setMix((m) => ({ ...m, [name]: { ...state, muted } }));
                       }}
                     >
-                      {state.muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                      {state.muted ? (
+                        <VolumeX className="size-4" />
+                      ) : (
+                        <Volume2 className="size-4" />
+                      )}
                     </button>
                     <span className="w-16 text-xs">{STEM_LABELS[name]}</span>
                     <Slider

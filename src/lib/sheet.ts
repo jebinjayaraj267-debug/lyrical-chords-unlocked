@@ -110,6 +110,20 @@ function normalizeForMatch(s: string) {
   return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
+function lyricMatchScore(left: string, right: string): number {
+  const a = normalizeForMatch(left);
+  const b = normalizeForMatch(right);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.startsWith(b) || b.startsWith(a)) return 0.9;
+  const shorter = a.length < b.length ? a : b;
+  let common = 0;
+  for (const char of new Set(shorter)) {
+    if (a.includes(char) && b.includes(char)) common += 1;
+  }
+  return common / Math.max(1, new Set(shorter).size);
+}
+
 /**
  * Map each lyric line to the timestamped line it corresponds to, in order.
  * Returns null when too few lines match to trust the timings.
@@ -127,15 +141,19 @@ function windowsFromSynced(
   for (let i = 0; i < allLines.length; i++) {
     const target = normalizeForMatch(allLines[i]!);
     if (!target) continue;
-    for (let probe = si; probe < Math.min(synced.length, si + 8); probe++) {
-      const candidate = normalizeForMatch(synced[probe]!.text);
-      if (!candidate) continue;
-      if (candidate === target || candidate.startsWith(target) || target.startsWith(candidate)) {
-        times[i] = synced[probe]!.time;
-        si = probe + 1;
-        matched += 1;
-        break;
+    let bestProbe = -1;
+    let bestScore = 0;
+    for (let probe = si; probe < Math.min(synced.length, si + 24); probe++) {
+      const score = lyricMatchScore(allLines[i]!, synced[probe]!.text);
+      if (score > bestScore) {
+        bestScore = score;
+        bestProbe = probe;
       }
+    }
+    if (bestProbe >= 0 && bestScore >= 0.55) {
+      times[i] = synced[bestProbe]!.time;
+      si = bestProbe + 1;
+      matched += 1;
     }
   }
 
@@ -207,7 +225,10 @@ export function buildSheet(
     while (li < windows.length - 1 && c.start >= windows[li]!.to) li += 1;
     const win = windows[li]!;
     const lyric = allLines[li]!;
-    const frac = Math.min(1, Math.max(0, (c.start - win.from) / Math.max(0.001, win.to - win.from)));
+    const frac = Math.min(
+      1,
+      Math.max(0, (c.start - win.from) / Math.max(0.001, win.to - win.from)),
+    );
     const target = Math.round(frac * Math.max(lyric.length - 1, 1));
     perLine[li]!.push({ pos: target, label: c.label, time: c.start });
   }
@@ -240,7 +261,6 @@ export function buildSheet(
     }
     return placed;
   });
-
 
   let idx = 0;
   let romanIdx = 0;

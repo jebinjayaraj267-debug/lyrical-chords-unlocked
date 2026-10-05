@@ -15,6 +15,7 @@ import { Route as ChordsRouteImport } from './routes/chords'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as TunerRouteImport } from './routes/tuner'
 import { Route as ApiChordminiRouteImport } from './routes/api/chordmini'
+import { Route as ApiChordsRouteImport } from './routes/api/chords'
 import { Route as ApiSeparateRouteImport } from './routes/api/separate'
 import { Route as SongIdRouteImport } from './routes/song.$id'
 
@@ -48,6 +49,11 @@ const ApiChordminiRoute = ApiChordminiRouteImport.update({
   path: '/api/chordmini',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiChordsRoute = ApiChordsRouteImport.update({
+  id: '/api/chords',
+  path: '/api/chords',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSeparateRoute = ApiSeparateRouteImport.update({
   id: '/api/separate',
   path: '/api/separate',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/live': typeof LiveRoute
   '/tuner': typeof TunerRoute
   '/api/chordmini': typeof ApiChordminiRoute
+  '/api/chords': typeof ApiChordsRoute
   '/api/separate': typeof ApiSeparateRoute
   '/song/$id': typeof SongIdRoute
 }
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/live': typeof LiveRoute
   '/tuner': typeof TunerRoute
   '/api/chordmini': typeof ApiChordminiRoute
+  '/api/chords': typeof ApiChordsRoute
   '/api/separate': typeof ApiSeparateRoute
   '/song/$id': typeof SongIdRoute
 }
@@ -87,6 +95,7 @@ export interface FileRoutesById {
   '/live': typeof LiveRoute
   '/tuner': typeof TunerRoute
   '/api/chordmini': typeof ApiChordminiRoute
+  '/api/chords': typeof ApiChordsRoute
   '/api/separate': typeof ApiSeparateRoute
   '/song/$id': typeof SongIdRoute
 }
@@ -99,6 +108,7 @@ export interface FileRouteTypes {
     | '/live'
     | '/tuner'
     | '/api/chordmini'
+    | '/api/chords'
     | '/api/separate'
     | '/song/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/live'
     | '/tuner'
     | '/api/chordmini'
+    | '/api/chords'
     | '/api/separate'
     | '/song/$id'
   id:
@@ -119,6 +130,7 @@ export interface FileRouteTypes {
     | '/live'
     | '/tuner'
     | '/api/chordmini'
+    | '/api/chords'
     | '/api/separate'
     | '/song/$id'
   fileRoutesById: FileRoutesById
@@ -130,6 +142,7 @@ export interface RootRouteChildren {
   LiveRoute: typeof LiveRoute
   TunerRoute: typeof TunerRoute
   ApiChordminiRoute: typeof ApiChordminiRoute
+  ApiChordsRoute: typeof ApiChordsRoute
   ApiSeparateRoute: typeof ApiSeparateRoute
   SongIdRoute: typeof SongIdRoute
 }
@@ -178,6 +191,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiChordminiRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/chords': {
+      id: '/api/chords'
+      path: '/api/chords'
+      fullPath: '/api/chords'
+      preLoaderRoute: typeof ApiChordsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/separate': {
       id: '/api/separate'
       path: '/api/separate'
@@ -202,6 +222,7 @@ const rootRouteChildren: RootRouteChildren = {
   LiveRoute: LiveRoute,
   TunerRoute: TunerRoute,
   ApiChordminiRoute: ApiChordminiRoute,
+  ApiChordsRoute: ApiChordsRoute,
   ApiSeparateRoute: ApiSeparateRoute,
   SongIdRoute: SongIdRoute,
 }

@@ -136,15 +136,25 @@ export function parseBeats(payload: Json): { beats: number[]; downbeats: number[
 }
 
 export function parseChords(payload: Json): ChordEvent[] {
-  const raw = firstArray(payload, ["chords", "chord_sequence", "chordSequence", "segments"]);
+  const raw = firstArray(payload, [
+    "chords",
+    "chord_sequence",
+    "chordSequence",
+    "chord_predictions",
+    "predictions",
+    "segments",
+    "results",
+  ]);
   const out: ChordEvent[] = [];
 
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const o = item as Json;
     const start = num(o["start"]) ?? num(o["start_time"]) ?? num(o["time"]) ?? num(o["timestamp"]);
-    const end = num(o["end"]) ?? num(o["end_time"]);
-    const labelRaw = o["chord"] ?? o["label"] ?? o["name"] ?? o["chord_label"];
+    const end =
+      num(o["end"]) ?? num(o["end_time"]) ?? num(o["endTime"]) ?? num(o["duration"]);
+    const labelRaw =
+      o["chord"] ?? o["label"] ?? o["name"] ?? o["chord_label"] ?? o["chordLabel"];
     if (start === null || typeof labelRaw !== "string") continue;
     out.push({
       start,
