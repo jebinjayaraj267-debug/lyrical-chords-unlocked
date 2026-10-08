@@ -12,17 +12,20 @@ export async function startSeparation(
     throw new Error(body.error ?? "Could not separate stems.");
   }
   const archive = unzipSync(new Uint8Array(await res.arrayBuffer()));
-  return STEMS.flatMap((name) => {
-    const entry = Object.entries(archive).find(([path]) =>
+  const entries = Object.entries(archive);
+  return STEMS.flatMap<{ name: StemName; blob: Blob }>((name) => {
+    const entry = entries.find(([path]) =>
       new RegExp(`(?:^|/)${name}\\.(?:mp3|wav|m4a)$`, "i").test(path),
     );
-    return entry
-      ? [{
-          name,
-          blob: new Blob([entry[1]], {
-            type: path.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg",
-          }),
-        }]
-      : [];
+    if (!entry) return [];
+    const [path, bytes] = entry;
+    return [
+      {
+        name,
+        blob: new Blob([bytes], {
+          type: path.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg",
+        }),
+      },
+    ];
   });
 }

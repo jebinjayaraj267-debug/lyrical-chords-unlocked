@@ -32,15 +32,17 @@ async function callChordMini(base: string, path: string, file: File, model: stri
     const res = await fetch(`${base}${path}`, {
       method: "POST",
       body,
-      headers: appCheck ? { "X-Firebase-AppCheck": appCheck } : undefined,
+      headers: appCheck ? { "X-Firebase-AppCheck": appCheck } : {},
       signal: controller.signal,
     });
     if (res.status === 429) throw new Error("rate-limited");
     const payload = (await res.json().catch(() => ({}))) as unknown;
     const objectPayload = isObject(payload) ? payload : {};
-    if (!res.ok || objectPayload.success === false) {
+    if (!res.ok || objectPayload["success"] === false) {
       const detail = String(
-        objectPayload.error ?? objectPayload.message ?? `${path} returned ${res.status}`,
+        objectPayload["error"] ??
+          objectPayload["message"] ??
+          `${path} returned ${res.status}`,
       );
       throw new Error(detail);
     }
